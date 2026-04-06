@@ -1,4 +1,4 @@
-package main
+package i18n
 
 var catalogJA = messages{
 	// エラー

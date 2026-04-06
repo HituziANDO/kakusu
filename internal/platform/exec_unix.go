@@ -1,20 +1,20 @@
 //go:build !windows
 
-package main
+package platform
 
 import (
 	"os/signal"
 	"syscall"
 )
 
-func agentSysProcAttr() *syscall.SysProcAttr {
+func AgentSysProcAttr() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{Setsid: true}
 }
 
-func ignoreHUP() {
+func IgnoreHUP() {
 	signal.Ignore(syscall.SIGHUP)
 }
 
-func execRun(bin string, args []string, env []string) error {
+func ExecRun(bin string, args []string, env []string) error {
 	return syscall.Exec(bin, args, env)
 }

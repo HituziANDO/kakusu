@@ -1,4 +1,4 @@
-package main
+package i18n
 
 var catalogEN = messages{
 	// Errors

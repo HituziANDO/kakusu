@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"crypto/rand"
@@ -13,28 +13,33 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/HituziANDO/kakusu/internal/agent"
+	"github.com/HituziANDO/kakusu/internal/config"
+	"github.com/HituziANDO/kakusu/internal/crypto"
+	"github.com/HituziANDO/kakusu/internal/i18n"
+	"github.com/HituziANDO/kakusu/internal/platform"
+	"github.com/HituziANDO/kakusu/internal/ui"
+	"github.com/HituziANDO/kakusu/internal/vault"
 )
 
-// ---------------------------------------------------------------------------
-// ルートコマンド
-// ---------------------------------------------------------------------------
-
-var rootCmd = &cobra.Command{
+// RootCmd is the top-level cobra command.
+var RootCmd = &cobra.Command{
 	Use:           "kakusu",
 	Short:         "local secrets manager",
-	Version:       version,
+	Version:       config.Version,
 	SilenceErrors: true,
 	SilenceUsage:  true,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Print(i18nMsg(MsgHelp))
+		fmt.Print(i18n.Msg(i18n.MsgHelp))
 	},
 }
 
 func init() {
-	defaultHelp := rootCmd.HelpFunc()
-	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
-		if cmd == rootCmd {
-			fmt.Print(i18nMsg(MsgHelp))
+	defaultHelp := RootCmd.HelpFunc()
+	RootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+		if cmd == RootCmd {
+			fmt.Print(i18n.Msg(i18n.MsgHelp))
 		} else {
 			defaultHelp(cmd, args)
 		}
@@ -47,10 +52,19 @@ func init() {
 
 	agentCmd.AddCommand(agentStopCmd, agentStatusCmd)
 
-	rootCmd.AddCommand(
+	RootCmd.AddCommand(
 		initCmd, setCmd, getCmd, showCmd, listCmd, deleteCmd,
 		runCmd, exportCmd, passwdCmd, agentCmd, lockCmd, versionCmd,
 	)
+}
+
+// loadVault is a convenience wrapper that exits on error.
+func loadVault(allowCreate bool) *vault.State {
+	s, err := vault.LoadKakusu("", allowCreate, ui.PromptPassword, ui.PromptNewPassword)
+	if err != nil {
+		ui.Die(err.Error())
+	}
+	return s
 }
 
 // ---------------------------------------------------------------------------
@@ -61,32 +75,32 @@ var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize vault (set master password)",
 	Run: func(cmd *cobra.Command, args []string) {
-		path := kakusuFile()
+		path := config.KakusuFile()
 		if _, err := os.Stat(path); err == nil {
-			if !confirm(i18nMsg(MsgPromptOverwrite)) {
-				fmt.Fprintln(os.Stderr, i18nMsg(MsgCancelled))
+			if !ui.Confirm(i18n.Msg(i18n.MsgPromptOverwrite)) {
+				fmt.Fprintln(os.Stderr, i18n.Msg(i18n.MsgCancelled))
 				return
 			}
 		}
-		pw, err := promptNewPassword()
+		pw, err := ui.PromptNewPassword()
 		if err != nil {
-			die(err.Error())
+			ui.Die(err.Error())
 		}
-		salt := make([]byte, saltSize)
+		salt := make([]byte, crypto.SaltSize)
 		if _, err := io.ReadFull(rand.Reader, salt); err != nil {
-			die(err.Error())
+			ui.Die(err.Error())
 		}
-		key := deriveKey(pw, salt)
-		s := &kakusuState{data: make(kakusuData), key: key, salt: salt}
-		if err := s.save(); err != nil {
-			die(err.Error())
+		key := crypto.DeriveKey(pw, salt)
+		s := &vault.State{Data: make(vault.Data), Key: key, Salt: salt}
+		if err := s.Save(); err != nil {
+			ui.Die(err.Error())
 		}
-		if !agentDisabled() {
-			if err := ensureAgent(); err == nil {
-				agentSetKey(key, salt)
+		if !config.AgentDisabled() {
+			if err := agent.EnsureAgent(); err == nil {
+				agent.SetKey(key, salt)
 			}
 		}
-		fmt.Fprintf(os.Stderr, "✓ %s\n", i18nMsgf(MsgInitDone, path))
+		fmt.Fprintf(os.Stderr, "✓ %s\n", i18n.Msgf(i18n.MsgInitDone, path))
 	},
 }
 
@@ -99,30 +113,27 @@ var setCmd = &cobra.Command{
 	Short: "Store a secret (hidden input if value omitted)",
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) < 1 {
-			die(i18nMsg(MsgUsageSet))
+			ui.Die(i18n.Msg(i18n.MsgUsageSet))
 		}
-		group, key := parseRef(args[0])
+		group, key := vault.ParseRef(args[0])
 
 		var value string
 		if len(args) >= 2 {
 			value = strings.Join(args[1:], " ")
 		} else {
 			var err error
-			value, err = promptPassword(i18nMsgf(MsgPromptSecretValue, group, key))
+			value, err = ui.PromptPassword(i18n.Msgf(i18n.MsgPromptSecretValue, group, key))
 			if err != nil {
-				die(err.Error())
+				ui.Die(err.Error())
 			}
 		}
 
-		s, err := loadKakusu("", true)
-		if err != nil {
-			die(err.Error())
+		s := loadVault(true)
+		vault.SetSecret(s.Data, group, key, value)
+		if err := s.Save(); err != nil {
+			ui.Die(err.Error())
 		}
-		setSecret(s.data, group, key, value)
-		if err := s.save(); err != nil {
-			die(err.Error())
-		}
-		fmt.Fprintf(os.Stderr, "✓ %s\n", i18nMsgf(MsgSecretSaved, group, key))
+		fmt.Fprintf(os.Stderr, "✓ %s\n", i18n.Msgf(i18n.MsgSecretSaved, group, key))
 	},
 }
 
@@ -135,16 +146,13 @@ var getCmd = &cobra.Command{
 	Short: "Get secret value (stdout, pipeable)",
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) < 1 {
-			die(i18nMsg(MsgUsageGet))
+			ui.Die(i18n.Msg(i18n.MsgUsageGet))
 		}
-		group, key := parseRef(args[0])
-		s, err := loadKakusu("", false)
-		if err != nil {
-			die(err.Error())
-		}
-		v, ok := getSecret(s.data, group, key)
+		group, key := vault.ParseRef(args[0])
+		s := loadVault(false)
+		v, ok := vault.GetSecret(s.Data, group, key)
 		if !ok {
-			die(i18nMsgf(MsgErrSecretNotFound, group, key))
+			ui.Die(i18n.Msgf(i18n.MsgErrSecretNotFound, group, key))
 		}
 		fmt.Println(v)
 	},
@@ -159,16 +167,13 @@ var showCmd = &cobra.Command{
 	Short: "Show secret with label",
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) < 1 {
-			die(i18nMsg(MsgUsageShow))
+			ui.Die(i18n.Msg(i18n.MsgUsageShow))
 		}
-		group, key := parseRef(args[0])
-		s, err := loadKakusu("", false)
-		if err != nil {
-			die(err.Error())
-		}
-		v, ok := getSecret(s.data, group, key)
+		group, key := vault.ParseRef(args[0])
+		s := loadVault(false)
+		v, ok := vault.GetSecret(s.Data, group, key)
 		if !ok {
-			die(i18nMsgf(MsgErrSecretNotFound, group, key))
+			ui.Die(i18n.Msgf(i18n.MsgErrSecretNotFound, group, key))
 		}
 		fmt.Printf("\nkks://%s/%s\n  %s\n\n", group, key, v)
 	},
@@ -182,25 +187,22 @@ var listCmd = &cobra.Command{
 	Use:   "list [group]",
 	Short: "List secrets (values masked)",
 	Run: func(cmd *cobra.Command, args []string) {
-		s, err := loadKakusu("", false)
-		if err != nil {
-			die(err.Error())
-		}
-		if len(s.data) == 0 {
-			fmt.Fprintln(os.Stderr, i18nMsg(MsgNoSecrets))
+		s := loadVault(false)
+		if len(s.Data) == 0 {
+			fmt.Fprintln(os.Stderr, i18n.Msg(i18n.MsgNoSecrets))
 			return
 		}
 
 		filterGroup := ""
 		if len(args) > 0 {
 			filterGroup = args[0]
-			if _, ok := s.data[filterGroup]; !ok {
-				die(i18nMsgf(MsgErrGroupNotFound, filterGroup))
+			if _, ok := s.Data[filterGroup]; !ok {
+				ui.Die(i18n.Msgf(i18n.MsgErrGroupNotFound, filterGroup))
 			}
 		}
 
 		groups := make([]string, 0)
-		for g := range s.data {
+		for g := range s.Data {
 			if filterGroup == "" || g == filterGroup {
 				groups = append(groups, g)
 			}
@@ -209,9 +211,9 @@ var listCmd = &cobra.Command{
 
 		for _, g := range groups {
 			fmt.Printf("\n[%s]\n", g)
-			keys := make([]string, 0, len(s.data[g]))
+			keys := make([]string, 0, len(s.Data[g]))
 			maxLen := 0
-			for k := range s.data[g] {
+			for k := range s.Data[g] {
 				keys = append(keys, k)
 				if len(k) > maxLen {
 					maxLen = len(k)
@@ -219,7 +221,7 @@ var listCmd = &cobra.Command{
 			}
 			sort.Strings(keys)
 			for _, k := range keys {
-				fmt.Printf("  %-*s  %s\n", maxLen, k, mask(s.data[g][k]))
+				fmt.Printf("  %-*s  %s\n", maxLen, k, ui.Mask(s.Data[g][k]))
 			}
 		}
 		fmt.Println()
@@ -236,25 +238,22 @@ var deleteCmd = &cobra.Command{
 	Short:   "Delete a secret",
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) < 1 {
-			die(i18nMsg(MsgUsageDelete))
+			ui.Die(i18n.Msg(i18n.MsgUsageDelete))
 		}
-		group, key := parseRef(args[0])
-		s, err := loadKakusu("", false)
-		if err != nil {
-			die(err.Error())
+		group, key := vault.ParseRef(args[0])
+		s := loadVault(false)
+		if _, ok := vault.GetSecret(s.Data, group, key); !ok {
+			ui.Die(i18n.Msgf(i18n.MsgErrSecretNotFound, group, key))
 		}
-		if _, ok := getSecret(s.data, group, key); !ok {
-			die(i18nMsgf(MsgErrSecretNotFound, group, key))
-		}
-		if !confirm(i18nMsgf(MsgPromptDeleteConfirm, group, key)) {
-			fmt.Fprintln(os.Stderr, i18nMsg(MsgCancelled))
+		if !ui.Confirm(i18n.Msgf(i18n.MsgPromptDeleteConfirm, group, key)) {
+			fmt.Fprintln(os.Stderr, i18n.Msg(i18n.MsgCancelled))
 			return
 		}
-		deleteSecret(s.data, group, key)
-		if err := s.save(); err != nil {
-			die(err.Error())
+		vault.DeleteSecret(s.Data, group, key)
+		if err := s.Save(); err != nil {
+			ui.Die(err.Error())
 		}
-		fmt.Fprintf(os.Stderr, "✓ %s\n", i18nMsgf(MsgSecretDeleted, group, key))
+		fmt.Fprintf(os.Stderr, "✓ %s\n", i18n.Msgf(i18n.MsgSecretDeleted, group, key))
 	},
 }
 
@@ -267,21 +266,18 @@ var runCmd = &cobra.Command{
 	Short: "Resolve kks:// refs and run command",
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) == 0 {
-			die(i18nMsg(MsgUsageRun))
+			ui.Die(i18n.Msg(i18n.MsgUsageRun))
 		}
 		envFile, _ := cmd.Flags().GetString("env")
 
 		if _, err := os.Stat(envFile); os.IsNotExist(err) {
-			die(i18nMsgf(MsgErrEnvFileNotFound, envFile))
+			ui.Die(i18n.Msgf(i18n.MsgErrEnvFileNotFound, envFile))
 		}
 
-		s, err := loadKakusu("", false)
+		s := loadVault(false)
+		injected, err := vault.ResolveDotenv(envFile, s.Data)
 		if err != nil {
-			die(err.Error())
-		}
-		injected, err := resolveDotenv(envFile, s.data)
-		if err != nil {
-			die(err.Error())
+			ui.Die(err.Error())
 		}
 
 		keys := make([]string, 0, len(injected))
@@ -289,7 +285,7 @@ var runCmd = &cobra.Command{
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
-		fmt.Fprintf(os.Stderr, "✓ %s\n", i18nMsgf(MsgInjected, strings.Join(keys, ", ")))
+		fmt.Fprintf(os.Stderr, "✓ %s\n", i18n.Msgf(i18n.MsgInjected, strings.Join(keys, ", ")))
 
 		env := os.Environ()
 		for k, v := range injected {
@@ -298,10 +294,10 @@ var runCmd = &cobra.Command{
 
 		bin, err := exec.LookPath(args[0])
 		if err != nil {
-			die(i18nMsgf(MsgErrCommandNotFound, args[0]))
+			ui.Die(i18n.Msgf(i18n.MsgErrCommandNotFound, args[0]))
 		}
-		if err := execRun(bin, args, env); err != nil {
-			die(err.Error())
+		if err := platform.ExecRun(bin, args, env); err != nil {
+			ui.Die(err.Error())
 		}
 	},
 }
@@ -317,16 +313,13 @@ var exportCmd = &cobra.Command{
 		envFile, _ := cmd.Flags().GetString("env")
 
 		if _, err := os.Stat(envFile); os.IsNotExist(err) {
-			die(i18nMsgf(MsgErrEnvFileNotFound, envFile))
+			ui.Die(i18n.Msgf(i18n.MsgErrEnvFileNotFound, envFile))
 		}
 
-		s, err := loadKakusu("", false)
+		s := loadVault(false)
+		injected, err := vault.ResolveDotenv(envFile, s.Data)
 		if err != nil {
-			die(err.Error())
-		}
-		injected, err := resolveDotenv(envFile, s.data)
-		if err != nil {
-			die(err.Error())
+			ui.Die(err.Error())
 		}
 
 		keys := make([]string, 0, len(injected))
@@ -350,33 +343,30 @@ var passwdCmd = &cobra.Command{
 	Use:   "passwd",
 	Short: "Change master password",
 	Run: func(cmd *cobra.Command, args []string) {
-		s, err := loadKakusu("", false)
+		s := loadVault(false)
+		newPw, err := ui.PromptNewPassword()
 		if err != nil {
-			die(err.Error())
+			ui.Die(err.Error())
 		}
-		newPw, err := promptNewPassword()
-		if err != nil {
-			die(err.Error())
-		}
-		newSalt := make([]byte, saltSize)
+		newSalt := make([]byte, crypto.SaltSize)
 		if _, err := io.ReadFull(rand.Reader, newSalt); err != nil {
-			die(err.Error())
+			ui.Die(err.Error())
 		}
-		s.key = deriveKey(newPw, newSalt)
-		s.salt = newSalt
-		if err := s.save(); err != nil {
-			die(err.Error())
+		s.Key = crypto.DeriveKey(newPw, newSalt)
+		s.Salt = newSalt
+		if err := s.Save(); err != nil {
+			ui.Die(err.Error())
 		}
-		if !agentDisabled() {
-			agentClearKey()
-			agentSetKey(s.key, s.salt)
+		if !config.AgentDisabled() {
+			agent.ClearKey()
+			agent.SetKey(s.Key, s.Salt)
 		}
-		fmt.Fprintln(os.Stderr, "✓ "+i18nMsg(MsgPasswordChanged))
+		fmt.Fprintln(os.Stderr, "✓ "+i18n.Msg(i18n.MsgPasswordChanged))
 	},
 }
 
 // ---------------------------------------------------------------------------
-// agent（サブコマンドが未指定/不明の場合はエラー終了）
+// agent
 // ---------------------------------------------------------------------------
 
 var agentCmd = &cobra.Command{
@@ -384,9 +374,9 @@ var agentCmd = &cobra.Command{
 	Short: "Manage the key cache agent",
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) > 0 {
-			die(i18nMsgf(MsgErrUnknownSubcommand, args[0]))
+			ui.Die(i18n.Msgf(i18n.MsgErrUnknownSubcommand, args[0]))
 		}
-		die(i18nMsg(MsgUsageAgent))
+		ui.Die(i18n.Msg(i18n.MsgUsageAgent))
 	},
 }
 
@@ -394,37 +384,36 @@ var agentStopCmd = &cobra.Command{
 	Use:   "stop",
 	Short: "Stop the agent",
 	Run: func(cmd *cobra.Command, args []string) {
-		pidData, err := os.ReadFile(agentPIDPath())
+		pidData, err := os.ReadFile(config.AgentPIDPath())
 		if err != nil {
-			die(i18nMsg(MsgErrAgentNotRunning))
+			ui.Die(i18n.Msg(i18n.MsgErrAgentNotRunning))
 		}
 		pid, err := strconv.Atoi(strings.TrimSpace(string(pidData)))
 		if err != nil {
-			os.Remove(agentPIDPath())
-			os.Remove(agentSocketPath())
-			die(i18nMsg(MsgErrAgentNotRunning))
+			os.Remove(config.AgentPIDPath())
+			os.Remove(config.AgentSocketPath())
+			ui.Die(i18n.Msg(i18n.MsgErrAgentNotRunning))
 		}
 		proc, err := os.FindProcess(pid)
 		if err != nil {
-			os.Remove(agentPIDPath())
-			os.Remove(agentSocketPath())
-			die(i18nMsg(MsgErrAgentNotRunning))
+			os.Remove(config.AgentPIDPath())
+			os.Remove(config.AgentSocketPath())
+			ui.Die(i18n.Msg(i18n.MsgErrAgentNotRunning))
 		}
 		if err := proc.Signal(syscall.SIGTERM); err != nil {
-			os.Remove(agentPIDPath())
-			os.Remove(agentSocketPath())
-			die(i18nMsg(MsgErrAgentNotRunning))
+			os.Remove(config.AgentPIDPath())
+			os.Remove(config.AgentSocketPath())
+			ui.Die(i18n.Msg(i18n.MsgErrAgentNotRunning))
 		}
-		// エージェントのクリーンアップを待つ
 		for i := 0; i < 10; i++ {
 			time.Sleep(100 * time.Millisecond)
-			if _, err := os.Stat(agentSocketPath()); os.IsNotExist(err) {
+			if _, err := os.Stat(config.AgentSocketPath()); os.IsNotExist(err) {
 				break
 			}
 		}
-		os.Remove(agentPIDPath())
-		os.Remove(agentSocketPath())
-		fmt.Fprintln(os.Stderr, "✓ "+i18nMsg(MsgAgentStopped))
+		os.Remove(config.AgentPIDPath())
+		os.Remove(config.AgentSocketPath())
+		fmt.Fprintln(os.Stderr, "✓ "+i18n.Msg(i18n.MsgAgentStopped))
 	},
 }
 
@@ -432,20 +421,20 @@ var agentStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show agent status",
 	Run: func(cmd *cobra.Command, args []string) {
-		resp, err := agentQueryStatus()
+		resp, err := agent.QueryStatus()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, i18nMsg(MsgErrAgentNotRunning))
+			fmt.Fprintln(os.Stderr, i18n.Msg(i18n.MsgErrAgentNotRunning))
 			return
 		}
-		pidData, _ := os.ReadFile(agentPIDPath())
+		pidData, _ := os.ReadFile(config.AgentPIDPath())
 		pid := strings.TrimSpace(string(pidData))
-		fmt.Fprintln(os.Stderr, i18nMsgf(MsgAgentStatus, pid))
-		fmt.Fprintln(os.Stderr, i18nMsgf(MsgAgentTTL, time.Duration(resp.TTLSeconds)*time.Second))
+		fmt.Fprintln(os.Stderr, i18n.Msgf(i18n.MsgAgentStatus, pid))
+		fmt.Fprintln(os.Stderr, i18n.Msgf(i18n.MsgAgentTTL, time.Duration(resp.TTLSeconds)*time.Second))
 		if resp.HasKey {
 			remaining := time.Duration(resp.RemainingSeconds) * time.Second
-			fmt.Fprintln(os.Stderr, i18nMsgf(MsgKeyCachePresent, remaining.Truncate(time.Second)))
+			fmt.Fprintln(os.Stderr, i18n.Msgf(i18n.MsgKeyCachePresent, remaining.Truncate(time.Second)))
 		} else {
-			fmt.Fprintln(os.Stderr, i18nMsg(MsgKeyCacheNone))
+			fmt.Fprintln(os.Stderr, i18n.Msg(i18n.MsgKeyCacheNone))
 		}
 	},
 }
@@ -458,10 +447,10 @@ var lockCmd = &cobra.Command{
 	Use:   "lock",
 	Short: "Clear cached key immediately",
 	Run: func(cmd *cobra.Command, args []string) {
-		if err := agentClearKey(); err != nil {
-			// エージェント未起動時はキャッシュなし → 成功扱い
+		if err := agent.ClearKey(); err != nil {
+			// Agent not running — no cache to clear — success.
 		}
-		fmt.Fprintln(os.Stderr, "✓ "+i18nMsg(MsgKeyCacheCleared))
+		fmt.Fprintln(os.Stderr, "✓ "+i18n.Msg(i18n.MsgKeyCacheCleared))
 	},
 }
 
@@ -473,6 +462,6 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Show version",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println(i18nMsgf(MsgVersion, version))
+		fmt.Println(i18n.Msgf(i18n.MsgVersion, config.Version))
 	},
 }

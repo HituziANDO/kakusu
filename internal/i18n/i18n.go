@@ -1,4 +1,4 @@
-package main
+package i18n
 
 import (
 	"fmt"
@@ -6,12 +6,9 @@ import (
 	"strings"
 )
 
-// ---------------------------------------------------------------------------
-// メッセージキー定数
-// ---------------------------------------------------------------------------
-
+// Message key constants.
 const (
-	// エラーメッセージ
+	// Errors
 	MsgErrMessageTooLarge    = "err.message_too_large"
 	MsgErrAgentStartFailed   = "err.agent_start_failed"
 	MsgErrCiphertextTooShort = "err.ciphertext_too_short"
@@ -30,7 +27,7 @@ const (
 	MsgErrUnknownCommand     = "err.unknown_command"
 	MsgErrVaultNotFound      = "err.vault_not_found"
 
-	// 使い方
+	// Usage
 	MsgUsageSet    = "usage.set"
 	MsgUsageGet    = "usage.get"
 	MsgUsageShow   = "usage.show"
@@ -39,7 +36,7 @@ const (
 	MsgUsageAgent  = "usage.agent"
 	MsgUsageHint   = "usage.hint"
 
-	// プロンプト
+	// Prompts
 	MsgPromptMasterPassword = "prompt.master_password"
 	MsgPromptNewPassword    = "prompt.new_password"
 	MsgPromptConfirm        = "prompt.confirm_password"
@@ -49,7 +46,7 @@ const (
 	MsgPromptSecretValue    = "prompt.secret_value"
 	MsgPromptDeleteConfirm  = "prompt.delete_confirm"
 
-	// ステータス・成功メッセージ
+	// Status
 	MsgCancelled       = "status.cancelled"
 	MsgInitDone        = "status.init_done"
 	MsgSecretSaved     = "status.secret_saved"
@@ -64,14 +61,10 @@ const (
 	MsgKeyCacheNone    = "status.key_cache_none"
 	MsgKeyCacheCleared = "status.key_cache_cleared"
 
-	// ヘルプ・バージョン
+	// Help / version
 	MsgHelp    = "help.full"
 	MsgVersion = "version"
 )
-
-// ---------------------------------------------------------------------------
-// メッセージカタログ
-// ---------------------------------------------------------------------------
 
 type messages map[string]string
 
@@ -82,7 +75,7 @@ var catalogs = map[string]messages{
 
 var currentLang string
 
-func initLang() {
+func InitLang() {
 	currentLang = detectLang()
 }
 
@@ -101,8 +94,8 @@ func detectLang() string {
 	return "en"
 }
 
-// msg はフォーマット引数なしでメッセージを取得する
-func i18nMsg(key string) string {
+// Msg returns a message without format arguments.
+func Msg(key string) string {
 	if m, ok := catalogs[currentLang][key]; ok {
 		return m
 	}
@@ -112,7 +105,7 @@ func i18nMsg(key string) string {
 	return key
 }
 
-// msgf はフォーマット引数付きでメッセージを取得する
-func i18nMsgf(key string, args ...any) string {
-	return fmt.Sprintf(i18nMsg(key), args...)
+// Msgf returns a formatted message.
+func Msgf(key string, args ...any) string {
+	return fmt.Sprintf(Msg(key), args...)
 }

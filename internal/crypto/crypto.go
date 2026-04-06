@@ -1,4 +1,4 @@
-package main
+package crypto
 
 import (
 	"crypto/aes"
@@ -10,27 +10,18 @@ import (
 	"io"
 )
 
-// ---------------------------------------------------------------------------
-// 定数
-// ---------------------------------------------------------------------------
-
 const (
-	pbkdf2Iterations = 600_000
-	saltSize         = 32
-	nonceSize        = 12
-	keySize          = 32 // AES-256
+	Pbkdf2Iterations = 600_000
+	SaltSize         = 32
+	NonceSize        = 12
+	KeySize          = 32 // AES-256
 )
 
-// ---------------------------------------------------------------------------
-// 暗号化基盤
-// ---------------------------------------------------------------------------
-
-func deriveKey(password string, salt []byte) []byte {
-	// PBKDF2-HMAC-SHA256 を標準ライブラリで実装
-	// RFC 2898 準拠
+// DeriveKey derives an AES-256 key using PBKDF2-HMAC-SHA256 (RFC 2898).
+func DeriveKey(password string, salt []byte) []byte {
 	prf := hmac.New(sha256.New, []byte(password))
 	hashLen := prf.Size()
-	numBlocks := (keySize + hashLen - 1) / hashLen
+	numBlocks := (KeySize + hashLen - 1) / hashLen
 
 	var buf [4]byte
 	dk := make([]byte, 0, numBlocks*hashLen)
@@ -47,7 +38,7 @@ func deriveKey(password string, salt []byte) []byte {
 		U = prf.Sum(U)
 		T := make([]byte, hashLen)
 		copy(T, U)
-		for n := 2; n <= pbkdf2Iterations; n++ {
+		for n := 2; n <= Pbkdf2Iterations; n++ {
 			prf.Reset()
 			prf.Write(U)
 			U = U[:0]
@@ -58,10 +49,10 @@ func deriveKey(password string, salt []byte) []byte {
 		}
 		dk = append(dk, T...)
 	}
-	return dk[:keySize]
+	return dk[:KeySize]
 }
 
-func encryptData(plaintext, key []byte) ([]byte, error) {
+func EncryptData(plaintext, key []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
@@ -70,7 +61,7 @@ func encryptData(plaintext, key []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	nonce := make([]byte, nonceSize)
+	nonce := make([]byte, NonceSize)
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return nil, err
 	}
@@ -78,9 +69,9 @@ func encryptData(plaintext, key []byte) ([]byte, error) {
 	return append(nonce, ct...), nil
 }
 
-func decryptData(blob, key []byte) ([]byte, error) {
-	if len(blob) < nonceSize {
-		return nil, errors.New(i18nMsg(MsgErrCiphertextTooShort))
+func DecryptData(blob, key []byte) ([]byte, error) {
+	if len(blob) < NonceSize {
+		return nil, errors.New("ciphertext too short")
 	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -90,5 +81,5 @@ func decryptData(blob, key []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return gcm.Open(nil, blob[:nonceSize], blob[nonceSize:], nil)
+	return gcm.Open(nil, blob[:NonceSize], blob[NonceSize:], nil)
 }

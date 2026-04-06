@@ -1,6 +1,6 @@
 //go:build windows
 
-package main
+package platform
 
 import (
 	"os"
@@ -8,15 +8,15 @@ import (
 	"syscall"
 )
 
-func agentSysProcAttr() *syscall.SysProcAttr {
+func AgentSysProcAttr() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{}
 }
 
-func ignoreHUP() {
-	// SIGHUP は Windows に存在しない — no-op
+func IgnoreHUP() {
+	// SIGHUP does not exist on Windows.
 }
 
-func execRun(bin string, args []string, env []string) error {
+func ExecRun(bin string, args []string, env []string) error {
 	cmd := exec.Command(bin, args[1:]...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout

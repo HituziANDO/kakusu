@@ -1,38 +1,34 @@
 package main
 
-// kakusu - ローカル秘密情報管理CLI
-//
-// 仕様:
-//   - group/key 階層でシークレットを管理
-//   - .env ファイルに kks://group/key と書いてコマンド実行時に注入
-//   - 保存先: ~/.kakusu/secrets.enc (環境変数 KAKUSU_FILE で変更可)
-//   - 暗号化: AES-256-GCM + PBKDF2-HMAC-SHA256 (600,000 iterations)
-//   - エージェント: バックグラウンドプロセスで鍵をキャッシュ（自動起動）
-
 import (
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/HituziANDO/kakusu/internal/agent"
+	"github.com/HituziANDO/kakusu/internal/cli"
+	"github.com/HituziANDO/kakusu/internal/config"
+	"github.com/HituziANDO/kakusu/internal/i18n"
 )
 
 func main() {
-	initLang()
+	i18n.InitLang()
 
-	// 内部コマンド: エージェントサーバー起動
+	// Internal command: start agent server.
 	if len(os.Args) >= 2 && os.Args[1] == "__agent__" {
-		ttl := agentTTL()
+		ttl := config.AgentTTL()
 		if len(os.Args) >= 3 {
 			if d, err := time.ParseDuration(os.Args[2]); err == nil && d > 0 {
 				ttl = d
 			}
 		}
-		agentServe(ttl)
+		agent.Serve(ttl)
 		return
 	}
 
-	if err := rootCmd.Execute(); err != nil {
+	if err := cli.RootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
-		fmt.Fprintln(os.Stderr, i18nMsg(MsgUsageHint))
+		fmt.Fprintln(os.Stderr, i18n.Msg(i18n.MsgUsageHint))
 		os.Exit(1)
 	}
 }
