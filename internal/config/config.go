@@ -7,10 +7,10 @@ import (
 	"time"
 )
 
-const (
-	Version    = "0.4.0"
-	DefaultTTL = 30 * time.Minute
-)
+// Version is set via ldflags at build time (e.g. -X ...config.Version=1.0.0).
+var Version = "0.4.1"
+
+const DefaultTTL = 30 * time.Minute
 
 func KakusuFile() string {
 	if v := os.Getenv("KAKUSU_FILE"); v != "" {
