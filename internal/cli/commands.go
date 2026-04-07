@@ -164,7 +164,7 @@ var getCmd = &cobra.Command{
 
 var showCmd = &cobra.Command{
 	Use:   "show <group/key>",
-	Short: "Show secret with label",
+	Short: "Show the full value",
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) < 1 {
 			ui.Die(i18n.Msg(i18n.MsgUsageShow))

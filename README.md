@@ -1,24 +1,26 @@
 # kakusu
 
-![kakusu image](./kakusu-image.jpg "Header Image")
+[Japanese (日本語)](./docs/README_ja.md)
 
-`kakusu` は、ローカルに秘密情報（APIキー、パスワード等）を安全に保存・管理するCLIツールです。
+![kakusu image](./readme-image/kakusu-image.jpg "Header Image")
 
-`.env` ファイルに `kks://group/key` という参照を書き、コマンド実行時に実際の値に置換して環境変数として注入します。シークレット本体は暗号化ファイルにのみ存在し、`.env` ファイル自体には機密情報を一切含みません。
+`kakusu` is a CLI tool for securely storing and managing secrets (API keys, passwords, etc.) locally.
 
-## 特徴
+Write `kks://group/key` references in your `.env` files, and kakusu resolves them to actual values at runtime, injecting them as environment variables. The secrets themselves exist only in an encrypted file — your `.env` files never contain sensitive data.
 
-- **group/key 階層**でシークレットを整理（`/` を省略すると `default` グループに格納）
-- `.env` ファイルの `kks://` 参照を自動解決してコマンドに注入
-- **AES-256-GCM** + **PBKDF2-HMAC-SHA256** (600,000 iterations) による暗号化
-- **エージェント**によるマスターパスワードキャッシュ（ssh-agent パターン）
-- 外部サービス不要、すべてローカルで完結
-- **多言語対応**: 英語（デフォルト）/ 日本語を環境変数で切り替え可能
-- 依存ライブラリ最小限（Go 標準ライブラリ + `golang.org/x/term`）
+## Features
 
-## 対応プラットフォーム
+- **group/key hierarchy** to organize secrets (omitting `/` stores under the `default` group)
+- Automatically resolves `kks://` references in `.env` files and injects them into commands
+- **AES-256-GCM** + **PBKDF2-HMAC-SHA256** (600,000 iterations) encryption
+- **Agent** for master password caching (ssh-agent pattern)
+- Fully local — no external services required
+- **Multi-language support**: English (default) / Japanese, switchable via environment variable
+- Minimal dependencies (`cobra` + `golang.org/x/term`)
 
-| OS      | Arch   | 対象                |
+## Supported Platforms
+
+| OS      | Arch   | Target            |
 | ------- | ------ | ----------------- |
 | macOS   | x86_64 | Intel Mac         |
 | macOS   | arm64  | Apple Silicon     |
@@ -26,15 +28,15 @@
 | Linux   | arm64  | Linux ARM64       |
 | Windows | x86_64 | Windows Intel/AMD |
 
-## インストール
+## Installation
 
-[Releases](https://github.com/HituziANDO/kakusu/releases) ページからお使いの OS/Arch に合ったバイナリをダウンロードできます。
+Pre-built binaries are available on the [Releases](https://github.com/HituziANDO/kakusu/releases) page.
 
 ```bash
 go install github.com/HituziANDO/kakusu@latest
 ```
 
-または、ソースからビルド:
+Or build from source:
 
 ```bash
 git clone https://github.com/HituziANDO/kakusu.git
@@ -42,149 +44,149 @@ cd kakusu
 go build -o kakusu .
 ```
 
-### GoReleaser でローカルビルド
+### Local Build with GoReleaser
 
-全プラットフォーム向けのバイナリをまとめてビルドできます。
+Build binaries for all platforms at once:
 
 ```bash
-# GoReleaser のインストール
+# Install GoReleaser
 brew install goreleaser
 
-# スナップショットビルド（リリースせずにローカルで全バイナリを生成）
+# Snapshot build (generate all binaries locally without releasing)
 goreleaser release --snapshot --clean
 ```
 
-成果物は `dist/` ディレクトリに出力されます。
+Artifacts are output to the `dist/` directory.
 
-## クイックスタート
+## Quick Start
 
 ```bash
-# 1. 初期化（マスターパスワードを設定）
+# 1. Initialize (set master password)
 kakusu init
 
-# 2. シークレットを保存
+# 2. Store secrets
 kakusu set myproject/db_password
 kakusu set shared/openai_key sk-xxx...
 
-# 3. .env ファイルを作成
+# 3. Create a .env file
 cat <<EOF > .env
 DB_HOST=localhost
 DB_PASSWORD=kks://myproject/db_password
 OPENAI_API_KEY=kks://shared/openai_key
 EOF
 
-# 4. シークレットを注入してコマンド実行
+# 4. Inject secrets and run a command
 kakusu run -- python app.py
 ```
 
-## コマンド
+## Commands
 
-### 基本操作
+### Basic Operations
 
-| コマンド                             | 説明                        |
-| -------------------------------- | ------------------------- |
-| `kakusu init`                    | Kakusu を新規作成（マスターパスワード設定） |
-| `kakusu set <group/key> [value]` | シークレットを保存（value 省略で非表示入力） |
-| `kakusu get <group/key>`         | 値を取得（stdout、パイプ可）         |
-| `kakusu show <group/key>`        | 値を完全表示                    |
-| `kakusu list [group]`            | 一覧表示（値はマスク）               |
-| `kakusu delete <group/key>`      | 削除                        |
-| `kakusu passwd`                  | マスターパスワードを変更              |
-| `kakusu version`                 | バージョン表示                   |
+| Command                          | Description                                      |
+| -------------------------------- | ------------------------------------------------ |
+| `kakusu init`                    | Initialize a new vault (set master password)     |
+| `kakusu set <group/key> [value]` | Store a secret (hidden input if value is omitted)|
+| `kakusu get <group/key>`         | Get a value (stdout, pipeable)                   |
+| `kakusu show <group/key>`       | Show the full value                              |
+| `kakusu list [group]`            | List secrets (values are masked)                 |
+| `kakusu delete <group/key>`      | Delete a secret                                  |
+| `kakusu passwd`                  | Change master password                           |
+| `kakusu version`                 | Show version                                     |
 
-### .env 連携
+### .env Integration
 
-| コマンド                               | 説明                              |
-| ---------------------------------- | ------------------------------- |
-| `kakusu run [--env FILE] -- <cmd>` | `.env` の `kks://` 参照を解決してコマンド実行 |
-| `kakusu export [--env FILE]`       | eval 用に export 文を出力（POSIX シェル向け）|
+| Command                            | Description                                          |
+| ---------------------------------- | ---------------------------------------------------- |
+| `kakusu run [--env FILE] -- <cmd>` | Resolve `kks://` refs in `.env` and run a command    |
+| `kakusu export [--env FILE]`       | Output export statements for eval (POSIX shell)      |
 
-### エージェント（鍵キャッシュ）
+### Agent (Key Cache)
 
-| コマンド                  | 説明           |
-| --------------------- | ------------ |
-| `kakusu lock`         | 鍵キャッシュを消去（エージェント未起動時も成功） |
-| `kakusu agent status` | エージェントの状態を表示 |
-| `kakusu agent stop`   | エージェントを停止    |
+| Command               | Description                                          |
+| ---------------------- | ---------------------------------------------------- |
+| `kakusu lock`          | Clear cached key (succeeds even if agent is not running) |
+| `kakusu agent status`  | Show agent status                                    |
+| `kakusu agent stop`    | Stop the agent                                       |
 
-## .env ファイルの書き方
+## .env File Format
 
 ```dotenv
-# 通常の値はそのまま
+# Plain values as-is
 DB_HOST=localhost
 DB_PORT=5432
 
-# シークレットは kks:// 参照で
+# Secrets use kks:// references
 DB_PASSWORD=kks://myproject/db_password
 OPENAI_API_KEY=kks://shared/openai_key
 ```
 
-`kakusu run` または `kakusu export` を使うと、`kks://group/key` が実際の値に置換されます。
+`kakusu run` or `kakusu export` replaces `kks://group/key` with actual values.
 
 ```bash
-# 直接実行
+# Run directly
 kakusu run -- python app.py
 
-# 別の .env ファイルを指定
+# Specify a different .env file
 kakusu run --env .env.staging -- python app.py
 
-# シェルの環境変数に展開
+# Expand into shell environment variables
 eval "$(kakusu export)"
 ```
 
-## `run` と `export` の違い
+## `run` vs `export`
 
-|      | `kakusu run`          | `kakusu export`                 |
-| ---- | --------------------- | ------------------------------- |
-| 方式   | 環境変数を注入してコマンドを実行      | `export KEY='VALUE'` 形式のシェル文を出力 |
-| スコープ | 指定したコマンドのみ            | `eval` で現在のシェルセッション全体           |
-| 用途   | 1つのコマンドにシークレットを渡したいとき | シェル全体で複数コマンドから使いたいとき            |
+|         | `kakusu run`                        | `kakusu export`                              |
+| ------- | ----------------------------------- | -------------------------------------------- |
+| Method  | Injects env vars and runs a command | Outputs `export KEY='VALUE'` shell statements|
+| Scope   | Target command only                 | Entire shell session via `eval`              |
+| Use for | Passing secrets to a single command | Using secrets across multiple commands        |
 
 ```bash
-# run: 指定コマンドだけにシークレットを注入
+# run: inject secrets into a specific command only
 kakusu run -- python app.py
 
-# export: 現在のシェルに環境変数として展開
+# export: expand as environment variables in the current shell
 eval "$(kakusu export)"
 eval "$(kakusu export --env .env.staging)"
 ```
 
-## 環境変数
+## Environment Variables
 
-| 変数                | 説明              | デフォルト                   |
-| ----------------- | --------------- | ----------------------- |
-| `KAKUSU_FILE`     | 暗号化ファイルのパス      | `~/.kakusu/secrets.enc` |
-| `KAKUSU_LANG`     | 出力言語（`en`, `ja`）  | `en`                    |
-| `KAKUSU_TTL`      | 鍵キャッシュの有効期間     | `30m`                   |
-| `KAKUSU_NO_AGENT` | `1` でエージェントを無効化 | -                       |
+| Variable          | Description                   | Default                 |
+| ----------------- | ----------------------------- | ----------------------- |
+| `KAKUSU_FILE`     | Path to the encrypted vault   | `~/.kakusu/secrets.enc` |
+| `KAKUSU_LANG`     | Output language (`en`, `ja`)  | `en`                    |
+| `KAKUSU_TTL`      | Key cache TTL                 | `30m`                   |
+| `KAKUSU_NO_AGENT` | Set to `1` to disable agent   | -                       |
 
-## AI コーディングツールとの共存
+## Using with AI Coding Tools
 
-Claude Code などの AI コーディングアシスタントと併用する場合、**`kakusu run` の使用を強く推奨**します。
+When using AI coding assistants such as Claude Code, **`kakusu run` is strongly recommended**.
 
 ```bash
-# 推奨: シークレットはサブプロセスにのみ注入される
+# Recommended: secrets are injected only into the subprocess
 kakusu run -- npm start
 
-# 非推奨: シェル全体にexportされ、AIツールから env / printenv で読める
+# Not recommended: exported to the entire shell, readable by AI tools via env / printenv
 eval "$(kakusu export)"
 ```
 
-| 方式 | AI ツールからの可視性 |
+| Method | Visibility to AI tools |
 |---|---|
-| `kakusu run -- <cmd>` | 親シェルに秘密が残らないため**親シェルからは読めない**（実行対象プロセスとその子孫には渡る） |
-| `eval "$(kakusu export)"` | シェルの環境変数として展開されるため**読める** |
+| `kakusu run -- <cmd>` | Secrets do not remain in the parent shell, so they are **not readable from the parent shell** (they are passed to the target process and its descendants) |
+| `eval "$(kakusu export)"` | Expanded as shell environment variables, so they are **readable** |
 
-kakusu は `.env` ファイルの平文保護（ディスク上に秘密を置かない）を提供しますが、`export` でシェルに展開した値は通常の環境変数となり、同一シェルで動作するツールからアクセス可能です。`kakusu run` を使えば、親シェルに平文環境変数を残しません。ただし、実行対象プロセスとその子孫、プロセス監視ツールからはアクセス可能であり、`export` より露出範囲を狭める手段です。
+kakusu protects `.env` files from containing plaintext secrets (secrets never touch disk in plain form). However, values expanded via `export` become regular environment variables accessible to any tool running in the same shell. Using `kakusu run` avoids leaving plaintext environment variables in the parent shell. Note that the target process, its descendants, and process monitoring tools can still access them — `run` narrows the exposure surface compared to `export`.
 
-## セキュリティ
+## Security
 
-- **暗号化**: AES-256-GCM（認証付き暗号、改ざん検知あり）
-- **鍵導出**: PBKDF2-HMAC-SHA256（600,000 回反復）
-- **鍵キャッシュ**: エージェントプロセスがメモリ上のみに保持（ディスクに書き出さない）
-- **ファイル権限**: 暗号化ファイルは `0600`、ソケットも `0600`
-- **エージェント**: 自動起動・TTL 経過で鍵消去・アイドル時に自動終了
+- **Encryption**: AES-256-GCM (authenticated encryption with tamper detection)
+- **Key Derivation**: PBKDF2-HMAC-SHA256 (600,000 iterations)
+- **Key Cache**: Agent process holds the key in memory only (never written to disk)
+- **File Permissions**: Encrypted vault is `0600`, socket is `0600`
+- **Agent**: Auto-start, key cleared after TTL expiry, auto-shutdown on idle
 
-## ライセンス
+## License
 
 MIT

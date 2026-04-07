@@ -62,7 +62,7 @@ kakusu - local secrets manager
   kakusu init                          Initialize vault (set master password)
   kakusu set <group/key> [value]       Store a secret (hidden input if value omitted)
   kakusu get <group/key>               Get value (stdout, pipeable)
-  kakusu show <group/key>              Show value with label
+  kakusu show <group/key>              Show the full value
   kakusu list [group]                  List secrets (values masked)
   kakusu delete <group/key>            Delete a secret
   kakusu passwd                        Change master password
