@@ -76,6 +76,8 @@ kakusu - ローカル秘密情報管理CLI
 【.env 連携】
   kakusu run [--env FILE] -- <cmd>     .env の kks:// 参照を解決してコマンド実行
   kakusu export [--env FILE]           eval 用に export 文を出力
+  kakusu export <group>                グループ内の全シークレットを export
+  kakusu export <group/key>            特定のシークレットを export
 
 【.env ファイルの書き方】
   DB_HOST=localhost
@@ -88,6 +90,7 @@ kakusu - ローカル秘密情報管理CLI
   kakusu run -- python app.py
   kakusu run --env .env.staging -- python app.py
   eval "$(kakusu export)"
+  eval "$(kakusu export myproject)"
   kakusu list
   kakusu list myproject
 

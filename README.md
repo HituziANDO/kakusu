@@ -100,6 +100,8 @@ kakusu run -- python app.py
 | ---------------------------------- | ---------------------------------------------------- |
 | `kakusu run [--env FILE] -- <cmd>` | Resolve `kks://` refs in `.env` and run a command    |
 | `kakusu export [--env FILE]`       | Output export statements for eval (POSIX shell)      |
+| `kakusu export <group>`            | Export all secrets in a group                        |
+| `kakusu export <group/key>`        | Export a single secret                               |
 
 ### Agent (Key Cache)
 
@@ -149,6 +151,9 @@ kakusu run -- python app.py
 # export: expand as environment variables in the current shell
 eval "$(kakusu export)"
 eval "$(kakusu export --env .env.staging)"
+
+# export: export a specific group directly from vault
+eval "$(kakusu export myproject)"
 ```
 
 ## Environment Variables

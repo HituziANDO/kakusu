@@ -307,13 +307,50 @@ var runCmd = &cobra.Command{
 // ---------------------------------------------------------------------------
 
 var exportCmd = &cobra.Command{
-	Use:   "export [--env FILE]",
+	Use:   "export [--env FILE] [group[/key]]",
 	Short: "Output export statements for eval",
 	Run: func(cmd *cobra.Command, args []string) {
+		// If a group or group/key argument is given, export directly from vault.
+		if len(args) > 0 {
+			s := loadVault(false)
+			result := make(map[string]string)
+
+			if strings.Contains(args[0], "/") {
+				// group/key form — export a single secret.
+				group, key := vault.ParseRef(args[0])
+				v, ok := vault.GetSecret(s.Data, group, key)
+				if !ok {
+					ui.Die(i18n.Msgf(i18n.MsgErrSecretNotFound, group, key))
+				}
+				result[key] = v
+			} else {
+				// group only — export all keys in the group.
+				group := args[0]
+				g, ok := s.Data[group]
+				if !ok {
+					ui.Die(i18n.Msgf(i18n.MsgErrGroupNotFound, group))
+				}
+				for k, v := range g {
+					result[k] = v
+				}
+			}
+
+			printExports(result)
+			return
+		}
+
+		// No positional args — resolve a .env file.
 		envFile, _ := cmd.Flags().GetString("env")
+		envFlagChanged := cmd.Flags().Changed("env")
 
 		if _, err := os.Stat(envFile); os.IsNotExist(err) {
-			ui.Die(i18n.Msgf(i18n.MsgErrEnvFileNotFound, envFile))
+			if envFlagChanged {
+				// User explicitly specified --env but file not found.
+				ui.Die(i18n.Msgf(i18n.MsgErrEnvFileNotFound, envFile))
+			}
+			// No args, no .env file — show help.
+			cmd.Help()
+			return
 		}
 
 		s := loadVault(false)
@@ -322,17 +359,20 @@ var exportCmd = &cobra.Command{
 			ui.Die(err.Error())
 		}
 
-		keys := make([]string, 0, len(injected))
-		for k := range injected {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-
-		for _, k := range keys {
-			v := strings.ReplaceAll(injected[k], "'", "'\"'\"'")
-			fmt.Printf("export %s='%s'\n", k, v)
-		}
+		printExports(injected)
 	},
+}
+
+func printExports(m map[string]string) {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		v := strings.ReplaceAll(m[k], "'", "'\"'\"'")
+		fmt.Printf("export %s='%s'\n", k, v)
+	}
 }
 
 // ---------------------------------------------------------------------------

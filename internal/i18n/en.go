@@ -76,6 +76,8 @@ kakusu - local secrets manager
 [.env Integration]
   kakusu run [--env FILE] -- <cmd>     Resolve kks:// refs and run command
   kakusu export [--env FILE]           Output export statements for eval
+  kakusu export <group>                Export all secrets in a group
+  kakusu export <group/key>            Export a single secret
 
 [.env File Format]
   DB_HOST=localhost
@@ -88,6 +90,7 @@ kakusu - local secrets manager
   kakusu run -- python app.py
   kakusu run --env .env.staging -- python app.py
   eval "$(kakusu export)"
+  eval "$(kakusu export myproject)"
   kakusu list
   kakusu list myproject
 

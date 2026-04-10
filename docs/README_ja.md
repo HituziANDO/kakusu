@@ -100,6 +100,8 @@ kakusu run -- python app.py
 | ---------------------------------- | ------------------------------- |
 | `kakusu run [--env FILE] -- <cmd>` | `.env` の `kks://` 参照を解決してコマンド実行 |
 | `kakusu export [--env FILE]`       | eval 用に export 文を出力（POSIX シェル向け）|
+| `kakusu export <group>`            | グループ内の全シークレットを export |
+| `kakusu export <group/key>`        | 特定のシークレットを export |
 
 ### エージェント（鍵キャッシュ）
 
@@ -149,6 +151,9 @@ kakusu run -- python app.py
 # export: 現在のシェルに環境変数として展開
 eval "$(kakusu export)"
 eval "$(kakusu export --env .env.staging)"
+
+# export: vault から特定グループを直接 export
+eval "$(kakusu export myproject)"
 ```
 
 ## 環境変数
