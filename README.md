@@ -115,6 +115,8 @@ When you enter the master password, the agent caches the key in memory. `list`, 
 
 The cache TTL (`KAKUSU_TTL`) is extended each time the cache is used, but the cache ends 8 hours after the last password entry however often it is used.
 
+If you upgrade from v0.5.0 or earlier, run `kakusu agent stop` once after upgrading. An agent that is already running keeps being used with the old behavior, which has no 8-hour limit, and `kakusu lock` only clears its key without stopping it.
+
 ## .env File Format
 
 ```dotenv
