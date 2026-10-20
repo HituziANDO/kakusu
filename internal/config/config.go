@@ -14,7 +14,8 @@ const DefaultTTL = 30 * time.Minute
 
 // MaxKeyAge is how long the agent keeps a key after the last SET_KEY, however
 // often GET_KEY extends the TTL. Longer TTLs are clamped to it. It is not
-// configurable, so that no process can keep the key cached indefinitely.
+// configurable, so that neither KAKUSU_TTL nor the agent's startup argument can
+// keep the key cached indefinitely.
 const MaxKeyAge = 8 * time.Hour
 
 func KakusuFile() string {
