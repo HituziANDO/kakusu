@@ -233,7 +233,8 @@ var listCmd = &cobra.Command{
 			}
 			sort.Strings(keys)
 			for _, k := range keys {
-				fmt.Printf("  %-*s  %s\n", maxLen, k, ui.Mask(s.Data[g][k]))
+				// No part of the value: list runs on the cached key without a password.
+				fmt.Printf("  %-*s  ***\n", maxLen, k)
 			}
 		}
 		fmt.Println()

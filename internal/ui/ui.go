@@ -51,13 +51,6 @@ func PromptNewPassword() (string, error) {
 	}
 }
 
-func Mask(v string) string {
-	if len(v) > 6 {
-		return v[:6] + "..."
-	}
-	return "***"
-}
-
 func Die(message string) {
 	fmt.Fprintf(os.Stderr, "Error: %s\n", message)
 	os.Exit(1)

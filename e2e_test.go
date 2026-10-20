@@ -262,3 +262,18 @@ func TestRunUsesCache(t *testing.T) {
 		t.Errorf("stdout %q; want %q", r.stdout, want)
 	}
 }
+
+func TestListPrintsNoPartOfValues(t *testing.T) {
+	home := newVault(t)
+
+	r := mustSucceed(t, kakusu(t, home, nil, nil, "list"))
+	for ref, v := range secrets {
+		key := ref[strings.Index(ref, "/")+1:]
+		if !strings.Contains(r.stdout, key) {
+			t.Errorf("stdout %q; want key %s listed", r.stdout, key)
+		}
+		if i := strings.IndexAny(r.stdout, v); i >= 0 {
+			t.Errorf("stdout %q contains %q from the value of %s", r.stdout, r.stdout[i], ref)
+		}
+	}
+}
