@@ -98,7 +98,8 @@ kakusu run -- python app.py
 
 | コマンド                               | 説明                              |
 | ---------------------------------- | ------------------------------- |
-| `kakusu run [--env FILE] -- <cmd>` | `.env` の `kks://` 参照を解決してコマンド実行 |
+| `kakusu run [--env FILE] -- <cmd>` | `.env` の `kks://` 参照を解決してコマンド実行（端末でない出力では値を隠す） |
+| `kakusu run --no-masking -- <cmd>` | 出力中の値を隠さずにコマンド実行 |
 | `kakusu export [--env FILE]`       | eval 用に export 文を出力（POSIX シェル向け）|
 | `kakusu export <group>`            | グループ内の全シークレットを export |
 | `kakusu export <group/key>`        | 特定のシークレットを export |
@@ -162,6 +163,24 @@ eval "$(kakusu export --env .env.staging)"
 eval "$(kakusu export myproject)"
 ```
 
+## `run` の出力での値の隠蔽
+
+stdout または stderr が端末でないとき（AI ツールや CI がコマンドを実行するときのようにパイプやファイルのとき）、`kakusu run` はその出力にそのまま現れる `kks://` 参照の値をすべて `<concealed by kakusu>` に置き換えます。`DB_HOST=localhost` のような `.env` ファイルのリテラル値はそのまま出力されます。
+
+```bash
+kakusu run -- printenv DB_PASSWORD | cat
+# <concealed by kakusu>
+```
+
+次のものは隠されません。
+
+- 端末への出力（コマンドを疑似端末で実行する AI ツールを含む）
+- コマンドが変換した値（base64、URL や JSON のエスケープ、値の一部など）
+- コマンドが stdout や stderr ではなく、ファイル・`/dev/tty`・ネットワークに書き出した値
+- `--no-masking` を付けたときの出力。パイプで値を渡すときに使います: `kakusu run --no-masking -- printenv DB_PASSWORD | other-command`
+
+`kakusu run` はコマンドが終了し、その出力が終わってから終了します。そのため、コマンドが起動して出力を開いたままにするバックグラウンドプロセスがあると、`kakusu run` は終了しません。
+
 ## 環境変数
 
 | 変数                | 説明              | デフォルト                   |
@@ -190,7 +209,7 @@ eval "$(kakusu export)"
 
 kakusu は `.env` ファイルの平文保護（ディスク上に秘密を置かない）を提供しますが、`export` でシェルに展開した値は通常の環境変数となり、同一シェルで動作するツールからアクセス可能です。`kakusu run` を使えば、親シェルに平文環境変数を残しません。ただし、実行対象プロセスとその子孫、プロセス監視ツールからはアクセス可能であり、`export` より露出範囲を狭める手段です。
 
-鍵がキャッシュされている間も、その場でパスワードを入力しない限り kakusu 自身は値を出力しません。ただし `kakusu run` で起動したプロセスには値が渡るため、`kakusu run` の実行を許可された AI ツールは値を出力できます（例: `kakusu run -- printenv`）。許可するかどうかは AI ツールの権限設定で決めてください。
+鍵がキャッシュされている間も、その場でパスワードを入力しない限り kakusu 自身は値を出力しません。ただし `kakusu run` で起動したプロセスには値が渡ります。`kakusu run` は、それらのプロセスが端末でない出力にそのまま書いた値を隠しますが（「`run` の出力での値の隠蔽」を参照）、`kakusu run` の実行を許可された AI ツールは、そこに挙げた方法で値を得られます。たとえば、変換して出力する（`kakusu run -- sh -c 'printenv DB_PASSWORD | base64'`）か、`--no-masking` を付けます。`kakusu run` と `--no-masking` を許可するかどうかは AI ツールの権限設定で決めてください。
 
 kakusu は同じユーザーのプロセスを区別できず、どのプロセスもエージェントからキャッシュした鍵を受け取れます。`~/.kakusu` へのアクセスを防ぐのは AI ツールのサンドボックスの役割です。作業を終えたら `kakusu lock` でキャッシュを消去してください。
 

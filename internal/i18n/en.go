@@ -25,7 +25,7 @@ var catalogEN = messages{
 	MsgUsageGet:    "usage: kakusu get <group/key>",
 	MsgUsageShow:   "usage: kakusu show <group/key>",
 	MsgUsageDelete: "usage: kakusu delete <group/key>",
-	MsgUsageRun:    "usage: kakusu run [--env FILE] -- <command> [args...]",
+	MsgUsageRun:    "usage: kakusu run [--env FILE] [--no-masking] -- <command> [args...]",
 	MsgUsageAgent:  "usage: kakusu agent <stop|status>",
 	MsgUsageHint:   "  run 'kakusu help' for a list of commands",
 
@@ -79,9 +79,19 @@ kakusu - local secrets manager
 
 [.env Integration]
   kakusu run [--env FILE] -- <cmd>     Resolve kks:// refs and run command
+  kakusu run --no-masking -- <cmd>     Run without concealing values in output
   kakusu export [--env FILE]           Output export statements for eval
   kakusu export <group>                Export all secrets in a group
   kakusu export <group/key>            Export a single secret
+
+  When stdout or stderr is not a terminal, run replaces each value from a
+  kks:// ref in that output with <concealed by kakusu>. Not concealed: output
+  to a terminal (including AI tools that use a pseudo-terminal), transformed
+  values (base64, escaped, partial), values the command writes elsewhere
+  (files, /dev/tty, network), and output with --no-masking, which passes
+  values through a pipe. A background process that keeps the output open
+  keeps run from exiting. Decide in an AI tool's permission settings whether
+  it may use run and --no-masking.
 
 [.env File Format]
   DB_HOST=localhost

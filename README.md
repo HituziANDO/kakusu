@@ -98,7 +98,8 @@ kakusu run -- python app.py
 
 | Command                            | Description                                          |
 | ---------------------------------- | ---------------------------------------------------- |
-| `kakusu run [--env FILE] -- <cmd>` | Resolve `kks://` refs in `.env` and run a command    |
+| `kakusu run [--env FILE] -- <cmd>` | Resolve `kks://` refs in `.env` and run a command (conceals values in output that is not a terminal) |
+| `kakusu run --no-masking -- <cmd>` | Run a command without concealing values in output    |
 | `kakusu export [--env FILE]`       | Output export statements for eval (POSIX shell)      |
 | `kakusu export <group>`            | Export all secrets in a group                        |
 | `kakusu export <group/key>`        | Export a single secret                               |
@@ -162,6 +163,24 @@ eval "$(kakusu export --env .env.staging)"
 eval "$(kakusu export myproject)"
 ```
 
+## Concealing Values in `run` Output
+
+When stdout or stderr is not a terminal (a pipe or a file, as when an AI tool or CI runs the command), `kakusu run` replaces every value resolved from a `kks://` reference that appears as is in that output with `<concealed by kakusu>`. Literal values in the `.env` file, such as `DB_HOST=localhost`, are printed as is.
+
+```bash
+kakusu run -- printenv DB_PASSWORD | cat
+# <concealed by kakusu>
+```
+
+The following are not concealed:
+
+- Output to a terminal, including AI tools that run commands in a pseudo-terminal
+- Values the command transforms, such as base64, URL or JSON escaping, or part of a value
+- Values the command writes to files, `/dev/tty`, or the network instead of its stdout or stderr
+- Output with `--no-masking`. Use it to pass a value through a pipe: `kakusu run --no-masking -- printenv DB_PASSWORD | other-command`
+
+`kakusu run` exits after the command exits and its output ends, so a background process that the command starts and that keeps the output open keeps `kakusu run` running.
+
 ## Environment Variables
 
 | Variable          | Description                   | Default                 |
@@ -190,7 +209,7 @@ eval "$(kakusu export)"
 
 kakusu protects `.env` files from containing plaintext secrets (secrets never touch disk in plain form). However, values expanded via `export` become regular environment variables accessible to any tool running in the same shell. Using `kakusu run` avoids leaving plaintext environment variables in the parent shell. Note that the target process, its descendants, and process monitoring tools can still access them — `run` narrows the exposure surface compared to `export`.
 
-While the key is cached, kakusu itself prints no value unless you type the password at that moment. Processes started by `kakusu run`, however, receive the values, so an AI tool allowed to run `kakusu run` can print them (for example, `kakusu run -- printenv`). Decide whether to allow it in the AI tool's permission settings.
+While the key is cached, kakusu itself prints no value unless you type the password at that moment. Processes started by `kakusu run`, however, receive the values. `kakusu run` conceals the values they print as is to output that is not a terminal (see "Concealing Values in `run` Output"), but an AI tool allowed to run `kakusu run` can still obtain them in the ways listed there, for example by printing them transformed (`kakusu run -- sh -c 'printenv DB_PASSWORD | base64'`) or with `--no-masking`. Decide whether to allow `kakusu run` and `--no-masking` in the AI tool's permission settings.
 
 kakusu cannot distinguish processes running as the same user: any of them can obtain the cached key from the agent. Blocking access to `~/.kakusu` is the job of the AI tool's sandbox. Run `kakusu lock` to clear the cache when you finish.
 
