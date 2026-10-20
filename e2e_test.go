@@ -394,11 +394,14 @@ func TestRunExitsAsCommandDid(t *testing.T) {
 func TestRunForwardsSignals(t *testing.T) {
 	home := newVault(t)
 	envFile := writeEnvFile(t, home)
-	// kakusu runs with no controlling terminal, so it forwards SIGINT too.
-	for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGINT} {
+	// kakusu runs with no controlling terminal, so it forwards SIGINT and
+	// SIGQUIT too.
+	for _, sig := range []syscall.Signal{
+		syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP, syscall.SIGQUIT, syscall.SIGUSR1, syscall.SIGUSR2,
+	} {
 		t.Run(sig.String(), func(t *testing.T) {
 			p := start(t, home, nil, nil, kakusuBin, "run", "--env", envFile, "--",
-				"sh", "-c", `trap 'exit 42' TERM INT; echo ready; while :; do sleep 0.05; done`)
+				"sh", "-c", `trap 'exit 42' TERM INT HUP QUIT USR1 USR2; echo ready; while :; do sleep 0.05; done`)
 			if !p.waitUntil(t, func() bool { return p.stdout.String() == "ready\n" }) {
 				t.Fatalf("exited before ready; stdout %q; stderr %q", p.stdout.String(), p.stderr.String())
 			}
