@@ -73,6 +73,10 @@ kakusu - local secrets manager
   kakusu agent stop                    Stop the agent
   kakusu agent status                  Show agent status
 
+  list, set, delete, and run use the cached key. get, show, export, and passwd
+  always ask for the master password. The cache is extended on each use but
+  ends 8h after the last password entry.
+
 [.env Integration]
   kakusu run [--env FILE] -- <cmd>     Resolve kks:// refs and run command
   kakusu export [--env FILE]           Output export statements for eval
@@ -97,7 +101,7 @@ kakusu - local secrets manager
 [Environment Variables]
   KAKUSU_FILE       Custom vault path (e.g. ~/Dropbox/kakusu/secrets.enc)
   KAKUSU_LANG       Output language (en, ja; default: en)
-  KAKUSU_TTL        Key cache TTL (default: 30m, e.g. 1h, 45m)
+  KAKUSU_TTL        Key cache TTL (default: 30m, max: 8h, e.g. 1h, 45m)
   KAKUSU_NO_AGENT   Set to 1 to disable agent
 
 [Security]

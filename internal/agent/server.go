@@ -22,7 +22,24 @@ func stopTimer(t *time.Timer) {
 	}
 }
 
-func Serve(ttlDur time.Duration) {
+func Serve(ttlDur, maxKeyAge time.Duration) {
+	serve(ttlDur, maxKeyAge, wallClock)
+}
+
+// wallClock returns the current time without its monotonic clock reading, so
+// that comparisons and durations between such times use the wall clock. The
+// monotonic clock stops while the system sleeps (on darwin and Linux); the
+// wall clock does not.
+func wallClock() time.Time {
+	return time.Now().Round(0)
+}
+
+// serve is Serve with the clock for the maxKeyAge deadline passed in, so that
+// tests can move it forward as a system sleep would.
+func serve(ttlDur, maxKeyAge time.Duration, wallNow func() time.Time) {
+	if ttlDur > maxKeyAge {
+		ttlDur = maxKeyAge
+	}
 	sockPath := config.AgentSocketPath()
 
 	if conn, err := net.DialTimeout("unix", sockPath, 500*time.Millisecond); err == nil {
@@ -59,7 +76,20 @@ func Serve(ttlDur time.Duration) {
 	platform.IgnoreHUP()
 
 	var cachedKey, cachedSalt []byte
-	var expiresAt time.Time
+	// expiresAt slides on GET_KEY. keyDeadline is set on SET_KEY and is on the
+	// wall clock, so it passes even if the system sleeps through it.
+	var expiresAt, keyDeadline time.Time
+
+	// keyRemaining is how long the cached key stays valid: until the TTL
+	// expires or keyDeadline passes, whichever comes first. Every request
+	// checks it, because keyTimer can fire late after a sleep.
+	keyRemaining := func() time.Duration {
+		r := time.Until(expiresAt)
+		if d := keyDeadline.Sub(wallNow()); d < r {
+			r = d
+		}
+		return r
+	}
 
 	clearKey := func() {
 		for i := range cachedKey {
@@ -91,13 +121,13 @@ func Serve(ttlDur time.Duration) {
 			var resp Response
 			switch req.Type {
 			case "GET_KEY":
-				if cachedKey != nil && time.Now().Before(expiresAt) {
+				if cachedKey != nil && keyRemaining() > 0 {
 					resp.Status = "OK"
 					resp.Key = base64.StdEncoding.EncodeToString(cachedKey)
 					resp.Salt = base64.StdEncoding.EncodeToString(cachedSalt)
 					expiresAt = time.Now().Add(ttlDur)
 					stopTimer(keyTimer)
-					keyTimer.Reset(ttlDur)
+					keyTimer.Reset(keyRemaining())
 				} else {
 					if cachedKey != nil {
 						clearKey()
@@ -113,6 +143,7 @@ func Serve(ttlDur time.Duration) {
 				cachedKey, _ = base64.StdEncoding.DecodeString(req.Key)
 				cachedSalt, _ = base64.StdEncoding.DecodeString(req.Salt)
 				expiresAt = time.Now().Add(ttlDur)
+				keyDeadline = wallNow().Add(maxKeyAge)
 				stopTimer(keyTimer)
 				keyTimer.Reset(ttlDur)
 				stopTimer(idleTimer)
@@ -127,13 +158,10 @@ func Serve(ttlDur time.Duration) {
 
 			case "STATUS":
 				resp.Status = "OK"
-				resp.HasKey = cachedKey != nil && time.Now().Before(expiresAt)
+				remaining := keyRemaining()
+				resp.HasKey = cachedKey != nil && remaining > 0
 				resp.TTLSeconds = int(ttlDur.Seconds())
 				if resp.HasKey {
-					remaining := time.Until(expiresAt)
-					if remaining < 0 {
-						remaining = 0
-					}
 					resp.RemainingSeconds = int(remaining.Seconds())
 				}
 

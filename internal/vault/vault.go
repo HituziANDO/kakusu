@@ -27,8 +27,10 @@ type State struct {
 }
 
 // LoadKakusu loads (or creates) the vault.
+// With useCache false it ignores the agent cache and always asks for the
+// password; a correct password is still cached.
 // Password prompters are injected to avoid a dependency on the UI layer.
-func LoadKakusu(password string, allowCreate bool, promptPw func(string) (string, error), promptNewPw func() (string, error)) (*State, error) {
+func LoadKakusu(password string, allowCreate, useCache bool, promptPw func(string) (string, error), promptNewPw func() (string, error)) (*State, error) {
 	path := config.KakusuFile()
 	noAgent := config.AgentDisabled()
 
@@ -74,7 +76,8 @@ func LoadKakusu(password string, allowCreate bool, promptPw func(string) (string
 	blob := raw[crypto.SaltSize:]
 
 	// Try the agent cache first.
-	if password == "" && !noAgent {
+	triedCache := password == "" && useCache && !noAgent
+	if triedCache {
 		if err := agent.EnsureAgent(); err == nil {
 			if aKey, aSalt, err := agent.GetKey(); err == nil && aKey != nil {
 				if bytes.Equal(aSalt, salt) {
@@ -111,6 +114,11 @@ func LoadKakusu(password string, allowCreate bool, promptPw func(string) (string
 	}
 
 	if !noAgent {
+		// The cache lookup above, if it ran, has already tried to start the
+		// agent; trying again would only wait for it to fail a second time.
+		if !triedCache {
+			agent.EnsureAgent()
+		}
 		agent.SetKey(key, salt)
 	}
 

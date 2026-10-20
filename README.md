@@ -111,6 +111,12 @@ kakusu run -- python app.py
 | `kakusu agent status`  | Show agent status                                    |
 | `kakusu agent stop`    | Stop the agent                                       |
 
+When you enter the master password, the agent caches the key in memory. `list`, `set`, `delete`, and `run` use the cached key without asking again. `get`, `show`, `export`, and `passwd` never use the cache and always ask for the master password.
+
+The cache TTL (`KAKUSU_TTL`) is extended each time the cache is used, but the cache ends 8 hours after the last password entry however often it is used.
+
+If you upgrade from v0.5.0 or earlier, run `kakusu agent stop` once after upgrading. An agent that is already running keeps being used with the old behavior, which has no 8-hour limit, and `kakusu lock` only clears its key without stopping it.
+
 ## .env File Format
 
 ```dotenv
@@ -162,7 +168,7 @@ eval "$(kakusu export myproject)"
 | ----------------- | ----------------------------- | ----------------------- |
 | `KAKUSU_FILE`     | Path to the encrypted vault   | `~/.kakusu/secrets.enc` |
 | `KAKUSU_LANG`     | Output language (`en`, `ja`)  | `en`                    |
-| `KAKUSU_TTL`      | Key cache TTL                 | `30m`                   |
+| `KAKUSU_TTL`      | Key cache TTL (max `8h`)      | `30m`                   |
 | `KAKUSU_NO_AGENT` | Set to `1` to disable agent   | -                       |
 
 ## Using with AI Coding Tools
@@ -184,13 +190,17 @@ eval "$(kakusu export)"
 
 kakusu protects `.env` files from containing plaintext secrets (secrets never touch disk in plain form). However, values expanded via `export` become regular environment variables accessible to any tool running in the same shell. Using `kakusu run` avoids leaving plaintext environment variables in the parent shell. Note that the target process, its descendants, and process monitoring tools can still access them — `run` narrows the exposure surface compared to `export`.
 
+While the key is cached, kakusu itself prints no value unless you type the password at that moment. Processes started by `kakusu run`, however, receive the values, so an AI tool allowed to run `kakusu run` can print them (for example, `kakusu run -- printenv`). Decide whether to allow it in the AI tool's permission settings.
+
+kakusu cannot distinguish processes running as the same user: any of them can obtain the cached key from the agent. Blocking access to `~/.kakusu` is the job of the AI tool's sandbox. Run `kakusu lock` to clear the cache when you finish.
+
 ## Security
 
 - **Encryption**: AES-256-GCM (authenticated encryption with tamper detection)
 - **Key Derivation**: PBKDF2-HMAC-SHA256 (600,000 iterations)
 - **Key Cache**: Agent process holds the key in memory only (never written to disk)
 - **File Permissions**: Encrypted vault is `0600`, socket is `0600`
-- **Agent**: Auto-start, key cleared after TTL expiry, auto-shutdown on idle
+- **Agent**: Auto-start, key cleared after TTL expiry or 8 hours after the last password entry, auto-shutdown on idle
 
 ## License
 
