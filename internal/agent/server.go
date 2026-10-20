@@ -22,7 +22,10 @@ func stopTimer(t *time.Timer) {
 	}
 }
 
-func Serve(ttlDur time.Duration) {
+func Serve(ttlDur, maxKeyAge time.Duration) {
+	if ttlDur > maxKeyAge {
+		ttlDur = maxKeyAge
+	}
 	sockPath := config.AgentSocketPath()
 
 	if conn, err := net.DialTimeout("unix", sockPath, 500*time.Millisecond); err == nil {
@@ -59,7 +62,8 @@ func Serve(ttlDur time.Duration) {
 	platform.IgnoreHUP()
 
 	var cachedKey, cachedSalt []byte
-	var expiresAt time.Time
+	// expiresAt slides on GET_KEY but never passes keyDeadline, set on SET_KEY.
+	var expiresAt, keyDeadline time.Time
 
 	clearKey := func() {
 		for i := range cachedKey {
@@ -96,8 +100,11 @@ func Serve(ttlDur time.Duration) {
 					resp.Key = base64.StdEncoding.EncodeToString(cachedKey)
 					resp.Salt = base64.StdEncoding.EncodeToString(cachedSalt)
 					expiresAt = time.Now().Add(ttlDur)
+					if expiresAt.After(keyDeadline) {
+						expiresAt = keyDeadline
+					}
 					stopTimer(keyTimer)
-					keyTimer.Reset(ttlDur)
+					keyTimer.Reset(time.Until(expiresAt))
 				} else {
 					if cachedKey != nil {
 						clearKey()
@@ -113,6 +120,7 @@ func Serve(ttlDur time.Duration) {
 				cachedKey, _ = base64.StdEncoding.DecodeString(req.Key)
 				cachedSalt, _ = base64.StdEncoding.DecodeString(req.Salt)
 				expiresAt = time.Now().Add(ttlDur)
+				keyDeadline = time.Now().Add(maxKeyAge)
 				stopTimer(keyTimer)
 				keyTimer.Reset(ttlDur)
 				stopTimer(idleTimer)

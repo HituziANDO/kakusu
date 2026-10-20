@@ -22,7 +22,7 @@ func main() {
 				ttl = d
 			}
 		}
-		agent.Serve(ttl)
+		agent.Serve(ttl, config.MaxKeyAge)
 		return
 	}
 

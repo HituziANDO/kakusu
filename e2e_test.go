@@ -277,3 +277,15 @@ func TestListPrintsNoPartOfValues(t *testing.T) {
 		}
 	}
 }
+
+func TestAgentClampsTTLTo8Hours(t *testing.T) {
+	home := newVault(t)
+	mustSucceed(t, kakusu(t, home, nil, nil, "agent", "stop"))
+	// list starts the agent with KAKUSU_TTL as its startup argument.
+	mustSucceed(t, kakusu(t, home, []string{"KAKUSU_TTL=1000h"}, []string{testPassword}, "list"))
+
+	r := mustSucceed(t, kakusu(t, home, nil, nil, "agent", "status"))
+	if !strings.Contains(r.stderr, "TTL:       8h0m0s\n") {
+		t.Errorf("stderr %q; want TTL 8h0m0s", r.stderr)
+	}
+}
