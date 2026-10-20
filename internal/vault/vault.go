@@ -113,9 +113,12 @@ func LoadKakusu(password string, allowCreate, useCache bool, promptPw func(strin
 	}
 
 	if !noAgent {
-		if err := agent.EnsureAgent(); err == nil {
-			agent.SetKey(key, salt)
+		// With useCache, the cache lookup above has already tried to start the
+		// agent; trying again would only wait for it to fail a second time.
+		if !useCache {
+			agent.EnsureAgent()
 		}
+		agent.SetKey(key, salt)
 	}
 
 	return &State{Data: data, Key: key, Salt: salt}, nil
