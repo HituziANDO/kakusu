@@ -68,9 +68,9 @@ func loadVault(allowCreate bool) *vault.State {
 }
 
 // loadVaultAskingPassword is loadVault without the agent cache. Commands that
-// print values or change the password use it, so that another process running
-// while the key is cached (such as an AI coding tool) cannot do either without
-// the user typing the password.
+// print values or change the password use it, so that, while the key is cached,
+// these commands print no value and change no password unless the user types
+// the password.
 func loadVaultAskingPassword() *vault.State {
 	s, err := vault.LoadKakusu("", false, false, ui.PromptPassword, ui.PromptNewPassword)
 	if err != nil {
