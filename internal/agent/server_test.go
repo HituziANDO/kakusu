@@ -102,6 +102,30 @@ func TestKeyExpiresMaxKeyAgeAfterSetKeyOnWallClock(t *testing.T) {
 	}
 }
 
+func TestSetKeyRestartsMaxKeyAge(t *testing.T) {
+	wall := newFakeWall()
+	startServe(t, time.Hour, 8*time.Hour, wall.now)
+	mustSetKey(t)
+	wall.advance(5 * time.Hour)
+	mustSetKey(t)
+
+	// 9h after the first SET_KEY and 4h after the last. STATUS checks that the
+	// key is still valid after the GET_KEY extension, not only by the TTL that
+	// SET_KEY set.
+	wall.advance(4 * time.Hour)
+	if mustGetKey(t) == nil {
+		t.Fatal("GET_KEY 4h after the last SET_KEY: NO_KEY; want the key")
+	}
+	if !mustQueryStatus(t).HasKey {
+		t.Error("STATUS 4h after the last SET_KEY: HasKey false; want true")
+	}
+
+	wall.advance(4*time.Hour + time.Second)
+	if mustGetKey(t) != nil {
+		t.Error("GET_KEY 8h1s after the last SET_KEY: got the key; want NO_KEY")
+	}
+}
+
 func TestGetKeyExtendsTTL(t *testing.T) {
 	// The wall clock stands still, so maxKeyAge stays out of the way.
 	startServe(t, time.Second, 8*time.Hour, newFakeWall().now)
