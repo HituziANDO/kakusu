@@ -76,7 +76,8 @@ func LoadKakusu(password string, allowCreate, useCache bool, promptPw func(strin
 	blob := raw[crypto.SaltSize:]
 
 	// Try the agent cache first.
-	if password == "" && useCache && !noAgent {
+	triedCache := password == "" && useCache && !noAgent
+	if triedCache {
 		if err := agent.EnsureAgent(); err == nil {
 			if aKey, aSalt, err := agent.GetKey(); err == nil && aKey != nil {
 				if bytes.Equal(aSalt, salt) {
@@ -113,9 +114,9 @@ func LoadKakusu(password string, allowCreate, useCache bool, promptPw func(strin
 	}
 
 	if !noAgent {
-		// With useCache, the cache lookup above has already tried to start the
+		// The cache lookup above, if it ran, has already tried to start the
 		// agent; trying again would only wait for it to fail a second time.
-		if !useCache {
+		if !triedCache {
 			agent.EnsureAgent()
 		}
 		agent.SetKey(key, salt)
