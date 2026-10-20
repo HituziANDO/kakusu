@@ -73,6 +73,10 @@ kakusu - ローカル秘密情報管理CLI
   kakusu agent stop                    エージェントを停止
   kakusu agent status                  エージェントの状態を表示
 
+  list / set / delete / run はキャッシュした鍵を使います。get / show / export /
+  passwd は毎回マスターパスワードを求めます。キャッシュは使うたびに延長されますが、
+  最後にパスワードを入力してから 8 時間で終わります。
+
 【.env 連携】
   kakusu run [--env FILE] -- <cmd>     .env の kks:// 参照を解決してコマンド実行
   kakusu export [--env FILE]           eval 用に export 文を出力
@@ -97,7 +101,7 @@ kakusu - ローカル秘密情報管理CLI
 【環境変数】
   KAKUSU_FILE       保存先のカスタマイズ（例: ~/Dropbox/kakusu/secrets.enc）
   KAKUSU_LANG       出力言語（en, ja; デフォルト: en）
-  KAKUSU_TTL        鍵キャッシュの有効期間（デフォルト: 30m、例: 1h, 45m）
+  KAKUSU_TTL        鍵キャッシュの有効期間（デフォルト: 30m、上限: 8h、例: 1h, 45m）
   KAKUSU_NO_AGENT   1 に設定するとエージェントを無効化（従来動作）
 
 【セキュリティ】
