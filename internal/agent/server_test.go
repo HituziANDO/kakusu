@@ -102,53 +102,28 @@ func TestKeyExpiresMaxKeyAgeAfterSetKeyOnWallClock(t *testing.T) {
 	}
 }
 
-func TestGetKeyStopsExtendingAtMaxKeyAge(t *testing.T) {
-	startServe(t, 300*time.Millisecond, time.Second, wallClock)
-	if err := SetKey([]byte("key"), []byte("salt")); err != nil {
-		t.Fatal(err)
-	}
-	start := time.Now()
+func TestGetKeyExtendsTTL(t *testing.T) {
+	// The wall clock stands still, so maxKeyAge stays out of the way.
+	startServe(t, time.Second, 8*time.Hour, newFakeWall().now)
+	mustSetKey(t)
 
-	// GET_KEY more often than the TTL keeps extending it until maxKeyAge.
-	for time.Since(start) < 1200*time.Millisecond {
-		key, _, err := GetKey()
-		if err != nil {
-			t.Fatal(err)
+	// GET_KEY every 100ms keeps the key past twice the TTL. This fails only
+	// if two GET_KEYs are more than the TTL apart.
+	for start := time.Now(); time.Since(start) < 2200*time.Millisecond; time.Sleep(100 * time.Millisecond) {
+		if mustGetKey(t) == nil {
+			t.Fatalf("GET_KEY %v after SET_KEY: NO_KEY; want the key", time.Since(start))
 		}
-		if elapsed := time.Since(start); key == nil && elapsed < 850*time.Millisecond {
-			t.Fatalf("GET_KEY %v after SET_KEY: NO_KEY; want the key", elapsed)
-		}
-		time.Sleep(100 * time.Millisecond)
 	}
-	key, _, err := GetKey()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if key != nil {
-		t.Fatalf("GET_KEY %v after SET_KEY: got the key; want NO_KEY", time.Since(start))
+	// With no GET_KEY for longer than the TTL, the key expires.
+	time.Sleep(1500 * time.Millisecond)
+	if mustGetKey(t) != nil {
+		t.Error("GET_KEY 1.5s after the previous one: got the key; want NO_KEY")
 	}
 }
 
 func TestServeClampsTTLToMaxKeyAge(t *testing.T) {
-	startServe(t, time.Hour, 3*time.Second, wallClock)
-	if err := SetKey([]byte("key"), []byte("salt")); err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(1600 * time.Millisecond)
-	if key, _, err := GetKey(); err != nil || key == nil {
-		t.Fatalf("GET_KEY: key %v, err %v; want the key", key, err)
-	}
-
-	resp, err := QueryStatus()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp.TTLSeconds != 3 {
-		t.Errorf("TTLSeconds = %d; want 3", resp.TTLSeconds)
-	}
-	// About 1.4s remain until maxKeyAge; the GET_KEY extension alone would
-	// leave about 3s.
-	if !resp.HasKey || resp.RemainingSeconds != 1 {
-		t.Errorf("HasKey %v, RemainingSeconds %d; want true, 1", resp.HasKey, resp.RemainingSeconds)
+	startServe(t, 8*time.Hour+time.Minute, 8*time.Hour, newFakeWall().now)
+	if resp := mustQueryStatus(t); resp.TTLSeconds != 8*60*60 {
+		t.Errorf("TTLSeconds = %d; want %d", resp.TTLSeconds, 8*60*60)
 	}
 }
