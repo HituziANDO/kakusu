@@ -105,6 +105,12 @@ func start(t *testing.T, home string, extraEnv []string, stdin io.Reader, name s
 	return p
 }
 
+// kill kills the child and the commands it started. The child leads its own
+// session, so its process group ID is its PID.
+func (p *process) kill() {
+	syscall.Kill(-p.cmd.Process.Pid, syscall.SIGKILL)
+}
+
 // waitUntil waits until ok returns true and reports whether it did before the
 // child exited.
 func (p *process) waitUntil(t *testing.T, ok func() bool) bool {
@@ -114,7 +120,7 @@ func (p *process) waitUntil(t *testing.T, ok func() bool) bool {
 		case <-p.done:
 			return ok()
 		case <-p.deadline:
-			p.cmd.Process.Kill()
+			p.kill()
 			t.Fatalf("%v: timed out; stdout %q; stderr %q", p.cmd.Args, p.stdout.String(), p.stderr.String())
 		case <-time.After(10 * time.Millisecond):
 		}
@@ -127,7 +133,7 @@ func (p *process) wait(t *testing.T) result {
 	select {
 	case <-p.done:
 	case <-p.deadline:
-		p.cmd.Process.Kill()
+		p.kill()
 		t.Fatalf("%v did not exit; stdout %q; stderr %q", p.cmd.Args, p.stdout.String(), p.stderr.String())
 	}
 	status, _ := p.cmd.ProcessState.Sys().(syscall.WaitStatus)
