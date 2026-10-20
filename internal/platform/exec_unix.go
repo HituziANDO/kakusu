@@ -78,9 +78,10 @@ func inForeground() bool {
 	return err == nil && pgrp == syscall.Getpgrp()
 }
 
-// ExitWithStatus ends kakusu the way the command described by state ended,
-// so that kakusu's caller sees the wait status it would see if ExecRun had
-// replaced kakusu with the command.
+// ExitWithStatus ends kakusu the way the command described by state ended:
+// with its exit code, by the same signal if SIGHUP, SIGINT, or SIGTERM killed
+// it, and with exit code 128+N, as a shell reports it, if another signal N
+// killed it.
 func ExitWithStatus(state *os.ProcessState) {
 	status := state.Sys().(syscall.WaitStatus)
 	if !status.Signaled() {
@@ -89,9 +90,9 @@ func ExitWithStatus(state *os.ProcessState) {
 	sig := status.Signal()
 	switch sig {
 	case syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM:
-		// Go's default action for these ends the process by the signal. For
-		// other signals it does not (SIGQUIT prints a stack dump, SIGUSR1
-		// does nothing), so they give the shell's exit code 128+N instead.
+		// Go's default action for these three ends the process by the
+		// signal. Sending kakusu other signals would not always end it that
+		// way: Go dumps goroutines on SIGQUIT and ignores SIGUSR1.
 		if !signal.Ignored(sig) {
 			signal.Reset(sig)
 			syscall.Kill(os.Getpid(), sig)

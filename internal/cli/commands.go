@@ -292,7 +292,7 @@ var runCmd = &cobra.Command{
 		}
 
 		// Nothing below uses s, so the decrypted vault is not kept while the
-		// command runs; only the values to conceal are.
+		// command runs; only the values from the env file are.
 		s := loadVault(false)
 		injected, secrets, err := vault.ResolveDotenv(envFile, s.Data)
 		if err != nil {
