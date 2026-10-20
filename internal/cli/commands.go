@@ -13,8 +13,10 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/HituziANDO/kakusu/internal/agent"
+	"github.com/HituziANDO/kakusu/internal/conceal"
 	"github.com/HituziANDO/kakusu/internal/config"
 	"github.com/HituziANDO/kakusu/internal/crypto"
 	"github.com/HituziANDO/kakusu/internal/i18n"
@@ -47,6 +49,7 @@ func init() {
 
 	setCmd.Flags().SetInterspersed(false)
 	runCmd.Flags().String("env", ".env", "env file path")
+	runCmd.Flags().Bool("no-masking", false, "print values in output as is")
 	runCmd.Flags().SetInterspersed(false)
 	exportCmd.Flags().String("env", ".env", "env file path")
 
@@ -275,20 +278,23 @@ var deleteCmd = &cobra.Command{
 // ---------------------------------------------------------------------------
 
 var runCmd = &cobra.Command{
-	Use:   "run [--env FILE] -- <command> [args...]",
+	Use:   "run [--env FILE] [--no-masking] -- <command> [args...]",
 	Short: "Resolve kks:// refs and run command",
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) == 0 {
 			ui.Die(i18n.Msg(i18n.MsgUsageRun))
 		}
 		envFile, _ := cmd.Flags().GetString("env")
+		noMasking, _ := cmd.Flags().GetBool("no-masking")
 
 		if _, err := os.Stat(envFile); os.IsNotExist(err) {
 			ui.Die(i18n.Msgf(i18n.MsgErrEnvFileNotFound, envFile))
 		}
 
+		// Nothing below uses s, so the decrypted vault is not kept while the
+		// command runs; only the values to conceal are.
 		s := loadVault(false)
-		injected, err := vault.ResolveDotenv(envFile, s.Data)
+		injected, secrets, err := vault.ResolveDotenv(envFile, s.Data)
 		if err != nil {
 			ui.Die(err.Error())
 		}
@@ -309,10 +315,73 @@ var runCmd = &cobra.Command{
 		if err != nil {
 			ui.Die(i18n.Msgf(i18n.MsgErrCommandNotFound, args[0]))
 		}
-		if err := platform.ExecRun(bin, args, env); err != nil {
+
+		stdoutTerminal := term.IsTerminal(int(os.Stdout.Fd()))
+		stderrTerminal := term.IsTerminal(int(os.Stderr.Fd()))
+		mode := chooseRunMode(noMasking, stdoutTerminal, stderrTerminal, platform.SameFile(os.Stdout, os.Stderr))
+		if mode == runExec {
+			if err := platform.ExecRun(bin, args, env); err != nil {
+				ui.Die(err.Error())
+			}
+			return
+		}
+
+		c := &exec.Cmd{Path: bin, Args: args, Env: env, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}
+		var writers []*conceal.Writer
+		if mode == runConcealShared {
+			// One writer for both makes os/exec give the command one pipe.
+			w := conceal.NewWriter(os.Stdout, secrets)
+			c.Stdout, c.Stderr = w, w
+			writers = append(writers, w)
+		} else {
+			if !stdoutTerminal {
+				w := conceal.NewWriter(os.Stdout, secrets)
+				c.Stdout = w
+				writers = append(writers, w)
+			}
+			if !stderrTerminal {
+				w := conceal.NewWriter(os.Stderr, secrets)
+				c.Stderr = w
+				writers = append(writers, w)
+			}
+		}
+		err = platform.RunChild(c)
+		for _, w := range writers {
+			w.Flush()
+		}
+		if c.ProcessState == nil {
 			ui.Die(err.Error())
 		}
+		platform.ExitWithStatus(c.ProcessState)
 	},
+}
+
+// runMode is how run connects the command's stdout and stderr.
+type runMode int
+
+const (
+	// runExec runs the command through platform.ExecRun, which gives it
+	// kakusu's stdout and stderr, so nothing is concealed.
+	runExec runMode = iota
+	// runConceal passes a stream that is a terminal to the command as is and
+	// conceals the values in each other stream through its own pipe.
+	runConceal
+	// runConcealShared conceals stdout and stderr through one pipe. They are
+	// the same file (2>&1), and one pipe keeps the order of the writes.
+	runConcealShared
+)
+
+// chooseRunMode conceals output unless noMasking is set or both stdout and
+// stderr are terminals.
+func chooseRunMode(noMasking, stdoutTerminal, stderrTerminal, sameFile bool) runMode {
+	switch {
+	case noMasking || stdoutTerminal && stderrTerminal:
+		return runExec
+	case sameFile:
+		return runConcealShared
+	default:
+		return runConceal
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -367,7 +436,7 @@ var exportCmd = &cobra.Command{
 		}
 
 		s := loadVaultAskingPassword()
-		injected, err := vault.ResolveDotenv(envFile, s.Data)
+		injected, _, err := vault.ResolveDotenv(envFile, s.Data)
 		if err != nil {
 			ui.Die(err.Error())
 		}

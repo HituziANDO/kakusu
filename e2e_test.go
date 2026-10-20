@@ -11,6 +11,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -53,10 +54,11 @@ func TestMain(m *testing.M) {
 
 type result struct {
 	code           int
+	status         syscall.WaitStatus
 	stdout, stderr string
 }
 
-// syncBuffer lets the test read stderr while the child is still writing it.
+// syncBuffer lets the test read output while the child is still writing it.
 type syncBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
@@ -74,6 +76,64 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
+// process is a started child whose output the test can read while it runs.
+type process struct {
+	cmd            *exec.Cmd
+	stdout, stderr syncBuffer
+	done           chan struct{}
+	deadline       <-chan time.Time
+}
+
+// start starts name with args under home with extraEnv added. A nil stdin
+// means /dev/null.
+func start(t *testing.T, home string, extraEnv []string, stdin io.Reader, name string, args ...string) *process {
+	t.Helper()
+	p := &process{cmd: exec.Command(name, args...), done: make(chan struct{}), deadline: time.After(10 * time.Second)}
+	p.cmd.Dir = home
+	p.cmd.Env = append([]string{"HOME=" + home, "PATH=" + os.Getenv("PATH"), "KAKUSU_LANG=en"}, extraEnv...)
+	p.cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	p.cmd.Stdin = stdin
+	p.cmd.Stdout = &p.stdout
+	p.cmd.Stderr = &p.stderr
+	if err := p.cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		p.cmd.Wait()
+		close(p.done)
+	}()
+	return p
+}
+
+// waitUntil waits until ok returns true and reports whether it did before the
+// child exited.
+func (p *process) waitUntil(t *testing.T, ok func() bool) bool {
+	t.Helper()
+	for !ok() {
+		select {
+		case <-p.done:
+			return ok()
+		case <-p.deadline:
+			p.cmd.Process.Kill()
+			t.Fatalf("%v: timed out; stdout %q; stderr %q", p.cmd.Args, p.stdout.String(), p.stderr.String())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	return true
+}
+
+func (p *process) wait(t *testing.T) result {
+	t.Helper()
+	select {
+	case <-p.done:
+	case <-p.deadline:
+		p.cmd.Process.Kill()
+		t.Fatalf("%v did not exit; stdout %q; stderr %q", p.cmd.Args, p.stdout.String(), p.stderr.String())
+	}
+	status, _ := p.cmd.ProcessState.Sys().(syscall.WaitStatus)
+	return result{code: p.cmd.ProcessState.ExitCode(), status: status, stdout: p.stdout.String(), stderr: p.stderr.String()}
+}
+
 var promptRe = regexp.MustCompile(`(?:password|Confirm): `)
 
 // kakusu runs the binary under home with extraEnv added. With no input, stdin
@@ -82,60 +142,28 @@ var promptRe = regexp.MustCompile(`(?:password|Confirm): `)
 // so lines written together would be swallowed by the first prompt.
 func kakusu(t *testing.T, home string, extraEnv, input []string, args ...string) result {
 	t.Helper()
-	cmd := exec.Command(kakusuBin, args...)
-	cmd.Dir = home
-	cmd.Env = append([]string{"HOME=" + home, "PATH=" + os.Getenv("PATH"), "KAKUSU_LANG=en"}, extraEnv...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	var stdout bytes.Buffer
-	var stderr syncBuffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	var stdin *os.File
+	var stdin io.Reader
+	var w *os.File
 	if len(input) > 0 {
-		r, w, err := os.Pipe()
+		r, pw, err := os.Pipe()
 		if err != nil {
 			t.Fatal(err)
 		}
-		cmd.Stdin = r
-		stdin = w
 		defer r.Close()
-		defer w.Close()
+		defer pw.Close()
+		stdin, w = r, pw
 	}
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan struct{})
-	go func() {
-		cmd.Wait()
-		close(done)
-	}()
-
-	deadline := time.After(10 * time.Second)
-feed:
+	p := start(t, home, extraEnv, stdin, kakusuBin, args...)
 	for i, line := range input {
-		for len(promptRe.FindAllString(stderr.String(), -1)) <= i {
-			select {
-			case <-done:
-				break feed
-			case <-deadline:
-				cmd.Process.Kill()
-				t.Fatalf("kakusu %v: no prompt for input line %d; stderr: %q", args, i+1, stderr.String())
-			case <-time.After(10 * time.Millisecond):
-			}
+		if !p.waitUntil(t, func() bool { return len(promptRe.FindAllString(p.stderr.String(), -1)) > i }) {
+			break
 		}
-		fmt.Fprintln(stdin, line)
+		fmt.Fprintln(w, line)
 	}
-	if stdin != nil {
-		stdin.Close()
+	if w != nil {
+		w.Close()
 	}
-	select {
-	case <-done:
-	case <-deadline:
-		cmd.Process.Kill()
-		t.Fatalf("kakusu %v did not exit; stderr: %q", args, stderr.String())
-	}
-	return result{code: cmd.ProcessState.ExitCode(), stdout: stdout.String(), stderr: stderr.String()}
+	return p.wait(t)
 }
 
 func mustSucceed(t *testing.T, r result) result {
@@ -167,10 +195,13 @@ func newVault(t *testing.T) string {
 	return home
 }
 
-func writeEnvFile(t *testing.T, home string) string {
+// writeEnvFile writes an env file with X=kks://app/db_password followed by
+// extra lines.
+func writeEnvFile(t *testing.T, home string, extra ...string) string {
 	t.Helper()
 	path := filepath.Join(home, "x.env")
-	if err := os.WriteFile(path, []byte("X=kks://app/db_password\n"), 0600); err != nil {
+	lines := append([]string{"X=kks://app/db_password"}, extra...)
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	return path
@@ -253,13 +284,186 @@ func TestPasswdChangesPasswordWithCurrentPassword(t *testing.T) {
 	}
 }
 
+// placeholder replaces values in run's output that is not a terminal. The
+// tests run kakusu with stdout and stderr as pipes.
+const placeholder = "<concealed by kakusu>"
+
 func TestRunUsesCache(t *testing.T) {
 	home := newVault(t)
 	envFile := writeEnvFile(t, home)
 
+	// stdin is /dev/null, so run succeeds only by using the cache.
 	r := mustSucceed(t, kakusu(t, home, nil, nil, "run", "--env", envFile, "--", "printenv", "X"))
+	if want := placeholder + "\n"; r.stdout != want {
+		t.Errorf("stdout %q; want %q", r.stdout, want)
+	}
+	if v := secrets["app/db_password"]; strings.Contains(r.stdout+r.stderr, v) {
+		t.Errorf("stdout %q, stderr %q; want neither to contain %q", r.stdout, r.stderr, v)
+	}
+}
+
+func TestRunConcealsStderrButNotLiteralValues(t *testing.T) {
+	home := newVault(t)
+	envFile := writeEnvFile(t, home, "H=localhost", "P=5432")
+
+	r := mustSucceed(t, kakusu(t, home, nil, nil, "run", "--env", envFile, "--",
+		"sh", "-c", `echo "$X" >&2; echo "$H:$P"`))
+	if want := "localhost:5432\n"; r.stdout != want {
+		t.Errorf("stdout %q; want %q", r.stdout, want)
+	}
+	if v := secrets["app/db_password"]; !strings.Contains(r.stderr, placeholder+"\n") || strings.Contains(r.stderr, v) {
+		t.Errorf("stderr %q; want %q in place of %q", r.stderr, placeholder, v)
+	}
+}
+
+func TestRunConcealsValueSplitAcrossWrites(t *testing.T) {
+	home := newVault(t)
+	envFile := writeEnvFile(t, home)
+
+	// The pause lets kakusu read the first half of the value on its own.
+	r := mustSucceed(t, kakusu(t, home, nil, nil, "run", "--env", envFile, "--",
+		"sh", "-c", `a=${X%?????}; printf %s "$a"; sleep 0.3; printf '%s\n' "${X#"$a"}"`))
+	if want := placeholder + "\n"; r.stdout != want {
+		t.Errorf("stdout %q; want %q", r.stdout, want)
+	}
+}
+
+func TestRunPrintsPromptWhileCommandRuns(t *testing.T) {
+	home := newVault(t)
+	envFile := writeEnvFile(t, home)
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+
+	// The command waits for a line on stdin, so the prompt, which cannot be
+	// the start of the value, reaches stdout only if kakusu does not hold it.
+	p := start(t, home, nil, r, kakusuBin, "run", "--env", envFile, "--",
+		"sh", "-c", `printf 'ready> '; read l; echo "got $l"`)
+	if !p.waitUntil(t, func() bool { return p.stdout.String() == "ready> " }) {
+		t.Fatalf("exited before the prompt; stdout %q; stderr %q", p.stdout.String(), p.stderr.String())
+	}
+	fmt.Fprintln(w, "ok")
+	res := mustSucceed(t, p.wait(t))
+	if want := "ready> got ok\n"; res.stdout != want {
+		t.Errorf("stdout %q; want %q", res.stdout, want)
+	}
+}
+
+func TestRunNoMaskingPrintsValue(t *testing.T) {
+	home := newVault(t)
+	envFile := writeEnvFile(t, home)
+
+	r := mustSucceed(t, kakusu(t, home, nil, nil, "run", "--env", envFile, "--no-masking", "--", "printenv", "X"))
 	if want := secrets["app/db_password"] + "\n"; r.stdout != want {
 		t.Errorf("stdout %q; want %q", r.stdout, want)
+	}
+}
+
+func TestRunExitsAsCommandDid(t *testing.T) {
+	home := newVault(t)
+	envFile := writeEnvFile(t, home)
+	run := func(script string) result {
+		return kakusu(t, home, nil, nil, "run", "--env", envFile, "--", "sh", "-c", script)
+	}
+
+	if r := run("exit 7"); r.code != 7 {
+		t.Errorf("exit 7: kakusu exit %d; want 7", r.code)
+	}
+	// The caller sees the same wait status as when kakusu replaced itself with
+	// the command.
+	if r := run("kill -TERM $$"); !r.status.Signaled() || r.status.Signal() != syscall.SIGTERM {
+		t.Errorf("killed by SIGTERM: kakusu exit %d, signaled %v by %v; want killed by SIGTERM",
+			r.code, r.status.Signaled(), r.status.Signal())
+	}
+	// SIGKILL is outside SIGHUP, SIGINT, and SIGTERM.
+	if r := run("kill -KILL $$"); r.status.Signaled() || r.code != 128+int(syscall.SIGKILL) {
+		t.Errorf("killed by SIGKILL: kakusu exit %d, signaled %v by %v; want exit %d",
+			r.code, r.status.Signaled(), r.status.Signal(), 128+int(syscall.SIGKILL))
+	}
+}
+
+func TestRunForwardsSignals(t *testing.T) {
+	home := newVault(t)
+	envFile := writeEnvFile(t, home)
+	// kakusu runs with no controlling terminal, so it forwards SIGINT too.
+	for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGINT} {
+		t.Run(sig.String(), func(t *testing.T) {
+			p := start(t, home, nil, nil, kakusuBin, "run", "--env", envFile, "--",
+				"sh", "-c", `trap 'exit 42' TERM INT; echo ready; while :; do sleep 0.05; done`)
+			if !p.waitUntil(t, func() bool { return p.stdout.String() == "ready\n" }) {
+				t.Fatalf("exited before ready; stdout %q; stderr %q", p.stdout.String(), p.stderr.String())
+			}
+			p.cmd.Process.Signal(sig)
+			if r := p.wait(t); r.code != 42 {
+				t.Errorf("exit %d; want 42 from the trap; stderr %q", r.code, r.stderr)
+			}
+		})
+	}
+}
+
+func TestRunKeepsIgnoredSignalsIgnored(t *testing.T) {
+	home := newVault(t)
+	envFile := writeEnvFile(t, home)
+	for _, sig := range []string{"HUP", "INT"} {
+		t.Run(sig, func(t *testing.T) {
+			// As nohup does, sh ignores the signal and replaces itself with kakusu.
+			p := start(t, home, nil, nil, "sh", "-c", `trap "" `+sig+`; exec "$0" "$@"`,
+				kakusuBin, "run", "--env", envFile, "--", "sh", "-c", "kill -"+sig+` $$; echo survived`)
+			if r := mustSucceed(t, p.wait(t)); r.stdout != "survived\n" {
+				t.Errorf("stdout %q; want %q", r.stdout, "survived\n")
+			}
+		})
+	}
+}
+
+func TestRunPassesStdin(t *testing.T) {
+	home := newVault(t)
+	envFile := writeEnvFile(t, home)
+
+	t.Run("open_pipe", func(t *testing.T) {
+		// stdin stays open with nothing written, so run must not wait for it.
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer r.Close()
+		defer w.Close()
+		mustSucceed(t, start(t, home, nil, r, kakusuBin, "run", "--env", envFile, "--", "true").wait(t))
+	})
+	t.Run("cat", func(t *testing.T) {
+		res := mustSucceed(t, start(t, home, nil, strings.NewReader("hello\n"), kakusuBin,
+			"run", "--env", envFile, "--", "cat").wait(t))
+		if res.stdout != "hello\n" {
+			t.Errorf("stdout %q; want %q", res.stdout, "hello\n")
+		}
+	})
+}
+
+func TestRunKeepsOrderOfStdoutAndStderrInSameFile(t *testing.T) {
+	home := newVault(t)
+	envFile := writeEnvFile(t, home)
+	const n = 200
+	script := fmt.Sprintf(`i=0; while [ $i -lt %d ]; do echo "out $i"; echo "err $i" >&2; i=$((i+1)); done; echo "$X" >&2`, n)
+
+	// sh makes kakusu's stderr the same pipe as its stdout, as 2>&1 does.
+	r := mustSucceed(t, start(t, home, nil, nil, "sh", "-c", `exec "$0" "$@" 2>&1`,
+		kakusuBin, "run", "--env", envFile, "--", "sh", "-c", script).wait(t))
+	want := []string{"✓ injected: X"}
+	for i := 0; i < n; i++ {
+		want = append(want, fmt.Sprintf("out %d", i), fmt.Sprintf("err %d", i))
+	}
+	want = append(want, placeholder, "")
+	got := strings.Split(r.stdout, "\n")
+	for i := range want {
+		if i >= len(got) || got[i] != want[i] {
+			t.Fatalf("line %d of stdout differs; want %q; stdout %q", i+1, want[i], r.stdout)
+		}
+	}
+	if len(got) != len(want) {
+		t.Errorf("stdout has %d lines; want %d; stdout %q", len(got), len(want), r.stdout)
 	}
 }
 
