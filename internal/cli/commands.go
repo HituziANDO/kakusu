@@ -60,7 +60,19 @@ func init() {
 
 // loadVault is a convenience wrapper that exits on error.
 func loadVault(allowCreate bool) *vault.State {
-	s, err := vault.LoadKakusu("", allowCreate, ui.PromptPassword, ui.PromptNewPassword)
+	s, err := vault.LoadKakusu("", allowCreate, true, ui.PromptPassword, ui.PromptNewPassword)
+	if err != nil {
+		ui.Die(err.Error())
+	}
+	return s
+}
+
+// loadVaultAskingPassword is loadVault without the agent cache. Commands that
+// print values or change the password use it, so that another process running
+// while the key is cached (such as an AI coding tool) cannot do either without
+// the user typing the password.
+func loadVaultAskingPassword() *vault.State {
+	s, err := vault.LoadKakusu("", false, false, ui.PromptPassword, ui.PromptNewPassword)
 	if err != nil {
 		ui.Die(err.Error())
 	}
@@ -149,7 +161,7 @@ var getCmd = &cobra.Command{
 			ui.Die(i18n.Msg(i18n.MsgUsageGet))
 		}
 		group, key := vault.ParseRef(args[0])
-		s := loadVault(false)
+		s := loadVaultAskingPassword()
 		v, ok := vault.GetSecret(s.Data, group, key)
 		if !ok {
 			ui.Die(i18n.Msgf(i18n.MsgErrSecretNotFound, group, key))
@@ -170,7 +182,7 @@ var showCmd = &cobra.Command{
 			ui.Die(i18n.Msg(i18n.MsgUsageShow))
 		}
 		group, key := vault.ParseRef(args[0])
-		s := loadVault(false)
+		s := loadVaultAskingPassword()
 		v, ok := vault.GetSecret(s.Data, group, key)
 		if !ok {
 			ui.Die(i18n.Msgf(i18n.MsgErrSecretNotFound, group, key))
@@ -312,7 +324,7 @@ var exportCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		// If a group or group/key argument is given, export directly from vault.
 		if len(args) > 0 {
-			s := loadVault(false)
+			s := loadVaultAskingPassword()
 			result := make(map[string]string)
 
 			if strings.Contains(args[0], "/") {
@@ -353,7 +365,7 @@ var exportCmd = &cobra.Command{
 			return
 		}
 
-		s := loadVault(false)
+		s := loadVaultAskingPassword()
 		injected, err := vault.ResolveDotenv(envFile, s.Data)
 		if err != nil {
 			ui.Die(err.Error())
@@ -383,7 +395,7 @@ var passwdCmd = &cobra.Command{
 	Use:   "passwd",
 	Short: "Change master password",
 	Run: func(cmd *cobra.Command, args []string) {
-		s := loadVault(false)
+		s := loadVaultAskingPassword()
 		newPw, err := ui.PromptNewPassword()
 		if err != nil {
 			ui.Die(err.Error())
