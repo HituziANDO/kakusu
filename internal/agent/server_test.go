@@ -4,6 +4,7 @@ package agent
 
 import (
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -53,6 +54,15 @@ func (w *fakeWall) advance(d time.Duration) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.t = w.t.Add(d)
+}
+
+// Sub between two times that both carry a monotonic reading uses the monotonic
+// clock, which stops while the system sleeps. Time.String shows that reading
+// as "m=".
+func TestWallClockHasNoMonotonicReading(t *testing.T) {
+	if s := wallClock().String(); strings.Contains(s, " m=") {
+		t.Errorf("wallClock() = %s; want no monotonic reading", s)
+	}
 }
 
 func mustSetKey(t *testing.T) {
