@@ -129,7 +129,7 @@ DB_PASSWORD=kks://myproject/db_password
 OPENAI_API_KEY=kks://shared/openai_key
 ```
 
-`kakusu run` または `kakusu export` を使うと、`kks://group/key` が実際の値に置換されます。
+`kakusu run` または `kakusu export` を使うと、`kks://group/key` が実際の値に置換されます。グループを省いた `kks://key` は `default` グループを指します。`kks://` で始まる値を解決できないと、`run` と `export` はエラーで終了します。
 
 ```bash
 # 直接実行
