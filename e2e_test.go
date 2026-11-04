@@ -15,6 +15,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -306,6 +307,16 @@ func TestPasswdChangesPasswordWithCurrentPassword(t *testing.T) {
 // tests run kakusu with stdout and stderr as pipes.
 const placeholder = "<concealed by kakusu>"
 
+// skipIfIgnored skips the test if sig is ignored in the test process. Go
+// keeps SIGHUP and SIGINT ignored if they were at startup, so kakusu and the
+// command would start with sig ignored, and sh cannot trap it.
+func skipIfIgnored(t *testing.T, sig syscall.Signal) {
+	t.Helper()
+	if signal.Ignored(sig) {
+		t.Skipf("%v is ignored in the test process, so kakusu and the command would ignore it", sig)
+	}
+}
+
 func TestRunUsesCache(t *testing.T) {
 	home := newVault(t)
 	envFile := writeEnvFile(t, home)
@@ -413,9 +424,13 @@ func TestRunExitsAsCommandDid(t *testing.T) {
 	}
 	// The caller sees the same wait status as when kakusu replaced itself with
 	// the command.
-	if r := run("kill -TERM $$"); !r.status.Signaled() || r.status.Signal() != syscall.SIGTERM {
-		t.Errorf("killed by SIGTERM: kakusu exit %d, signaled %v by %v; want killed by SIGTERM",
-			r.code, r.status.Signaled(), r.status.Signal())
+	for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP} {
+		t.Run(sig.String(), func(t *testing.T) {
+			skipIfIgnored(t, sig)
+			if r := run(fmt.Sprintf("kill -%d $$", sig)); !r.status.Signaled() || r.status.Signal() != sig {
+				t.Errorf("kakusu exit %d, signaled %v by %v; want killed by %v", r.code, r.status.Signaled(), r.status.Signal(), sig)
+			}
+		})
 	}
 	// SIGKILL is outside SIGHUP, SIGINT, and SIGTERM.
 	if r := run("kill -KILL $$"); r.status.Signaled() || r.code != 128+int(syscall.SIGKILL) {
@@ -433,6 +448,7 @@ func TestRunForwardsSignals(t *testing.T) {
 		syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP, syscall.SIGQUIT, syscall.SIGUSR1, syscall.SIGUSR2,
 	} {
 		t.Run(sig.String(), func(t *testing.T) {
+			skipIfIgnored(t, sig)
 			p := start(t, home, nil, nil, kakusuBin, "run", "--env", envFile, "--",
 				"sh", "-c", `trap 'exit 42' TERM INT HUP QUIT USR1 USR2; echo ready; while :; do sleep 0.05; done`)
 			if !p.waitUntil(t, func() bool { return p.stdout.String() == "ready\n" }) {
@@ -461,6 +477,7 @@ func TestRunEndsBySignalAfterCommandExits(t *testing.T) {
 		{syscall.SIGUSR1, false},
 	} {
 		t.Run(tc.sig.String(), func(t *testing.T) {
+			skipIfIgnored(t, tc.sig)
 			// The background sleep keeps the command's output open after the
 			// command exits.
 			p := start(t, home, nil, nil, kakusuBin, "run", "--env", envFile, "--",
