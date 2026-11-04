@@ -35,7 +35,11 @@ type State struct {
 // that there was no file.
 type Snapshot struct {
 	Exists bool
-	sum    [sha256.Size]byte
+	// unreadable means that the file exists but this process may not read it.
+	// Only init can save over such a file, because the other commands cannot
+	// load it; it counts as unchanged while it stays unreadable.
+	unreadable bool
+	sum        [sha256.Size]byte
 }
 
 // ReadSnapshot reads the vault file and returns its Snapshot.
@@ -43,6 +47,9 @@ func ReadSnapshot() (Snapshot, error) {
 	raw, err := os.ReadFile(config.KakusuFile())
 	if os.IsNotExist(err) {
 		return Snapshot{}, nil
+	}
+	if os.IsPermission(err) {
+		return Snapshot{Exists: true, unreadable: true}, nil
 	}
 	if err != nil {
 		return Snapshot{}, err

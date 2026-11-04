@@ -690,3 +690,15 @@ func TestLockFileFollowsKakusuFile(t *testing.T) {
 		t.Errorf("stderr %q; want %q", rb.stderr, want)
 	}
 }
+
+func TestInitOverwritesUnreadableVault(t *testing.T) {
+	home := newNoAgentVault(t)
+	if err := os.Chmod(filepath.Join(home, ".kakusu", "secrets.enc"), 0); err != nil {
+		t.Fatal(err)
+	}
+	r := mustSucceed(t, kakusu(t, home, noAgent, []string{"y", "NEWPASS12", "NEWPASS12"}, "init"))
+	if !confirmRe.MatchString(r.stderr) {
+		t.Errorf("stderr %q; want the overwrite question", r.stderr)
+	}
+	mustSucceed(t, kakusu(t, home, noAgent, []string{"NEWPASS12"}, "list"))
+}
