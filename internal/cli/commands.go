@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -327,28 +328,42 @@ var runCmd = &cobra.Command{
 		}
 
 		c := &exec.Cmd{Path: bin, Args: args, Env: env, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}
-		var writers []*conceal.Writer
+		var relays []*relay
+		pipe := func(out *os.File) *os.File {
+			r, err := newRelay(out, secrets)
+			if err != nil {
+				ui.Die(err.Error())
+			}
+			relays = append(relays, r)
+			return r.w
+		}
 		if mode == runConcealShared {
-			// One writer for both makes os/exec give the command one pipe.
-			w := conceal.NewWriter(os.Stdout, secrets)
+			w := pipe(os.Stdout)
 			c.Stdout, c.Stderr = w, w
-			writers = append(writers, w)
 		} else {
 			if !stdoutTerminal {
-				w := conceal.NewWriter(os.Stdout, secrets)
-				c.Stdout = w
-				writers = append(writers, w)
+				c.Stdout = pipe(os.Stdout)
 			}
 			if !stderrTerminal {
-				w := conceal.NewWriter(os.Stderr, secrets)
-				c.Stderr = w
-				writers = append(writers, w)
+				c.Stderr = pipe(os.Stderr)
 			}
 		}
-		err = platform.RunChild(c)
-		for _, w := range writers {
-			w.Flush()
+		var wg sync.WaitGroup
+		var outputs []*os.File
+		for _, r := range relays {
+			outputs = append(outputs, r.w)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				r.copy()
+			}()
 		}
+		drained := make(chan struct{})
+		go func() {
+			wg.Wait()
+			close(drained)
+		}()
+		err = platform.RunChild(c, outputs, drained)
 		if c.ProcessState == nil {
 			ui.Die(err.Error())
 		}
@@ -370,6 +385,30 @@ const (
 	// the same file (2>&1), and one pipe keeps the order of the writes.
 	runConcealShared
 )
+
+// relay copies what the command writes to the pipe end w into out with the
+// values concealed. The command gets w as an *os.File, so that waiting for
+// the command does not wait for a process it started that keeps w open.
+type relay struct {
+	r, w *os.File
+	cw   *conceal.Writer
+}
+
+func newRelay(out io.Writer, secrets []string) (*relay, error) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		return nil, err
+	}
+	return &relay{r: r, w: w, cw: conceal.NewWriter(out, secrets)}, nil
+}
+
+// copy copies until every process holding w has closed it, and then writes
+// the bytes that the conceal.Writer holds.
+func (r *relay) copy() {
+	io.Copy(r.cw, r.r)
+	r.cw.Flush()
+	r.r.Close()
+}
 
 // chooseRunMode conceals output unless noMasking is set or both stdout and
 // stderr are terminals.

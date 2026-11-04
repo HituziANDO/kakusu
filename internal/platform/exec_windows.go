@@ -33,12 +33,27 @@ func ExecRun(bin string, args []string, env []string) error {
 	return nil
 }
 
-// RunChild runs cmd. kakusu catches Ctrl+C without passing it on, because the
-// console sends it to cmd too, and so keeps relaying cmd's output until cmd
-// exits.
-func RunChild(cmd *exec.Cmd) error {
-	signal.Notify(make(chan os.Signal, 1), os.Interrupt)
-	return cmd.Run()
+// RunChild runs cmd. outputs are kakusu's copies of the pipe ends given to
+// cmd; RunChild closes them once cmd has started. It returns after cmd has
+// exited and drained is closed, which happens when every pipe has been read
+// to its end. Until cmd exits, kakusu catches Ctrl+C without passing it on,
+// because the console sends it to cmd too. After that, while a process that
+// cmd started keeps a pipe open, Ctrl+C ends kakusu as it ends any console
+// program that does not catch it.
+func RunChild(cmd *exec.Cmd, outputs []*os.File, drained <-chan struct{}) error {
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, os.Interrupt)
+	err := cmd.Start()
+	for _, f := range outputs {
+		f.Close()
+	}
+	if err != nil {
+		return err
+	}
+	err = cmd.Wait()
+	signal.Stop(sigs)
+	<-drained
+	return err
 }
 
 // ExitWithStatus exits with the exit code of the command described by state.

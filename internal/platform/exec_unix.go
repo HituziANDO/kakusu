@@ -3,6 +3,7 @@
 package platform
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -33,8 +34,13 @@ var forwardedSignals = []os.Signal{
 
 // RunChild runs cmd in kakusu's process group and passes on to it the signals
 // that kakusu receives meanwhile, so that cmd gets them as it would if
-// ExecRun had replaced kakusu with it.
-func RunChild(cmd *exec.Cmd) error {
+// ExecRun had replaced kakusu with it. outputs are kakusu's copies of the pipe
+// ends given to cmd; RunChild closes them once cmd has started. It returns
+// after cmd has exited and drained is closed, which happens when every pipe
+// has been read to its end. A signal that kakusu receives after cmd has
+// exited, while a process that cmd started keeps a pipe open, ends kakusu as
+// ExitWithStatus would if that signal had killed cmd.
+func RunChild(cmd *exec.Cmd, outputs []*os.File, drained <-chan struct{}) error {
 	sigs := make(chan os.Signal, len(forwardedSignals))
 	for _, sig := range forwardedSignals {
 		// cmd starts with the default action for every signal kakusu
@@ -44,24 +50,41 @@ func RunChild(cmd *exec.Cmd) error {
 			signal.Notify(sigs, sig)
 		}
 	}
-	if err := cmd.Start(); err != nil {
-		signal.Stop(sigs)
+	defer signal.Stop(sigs)
+	err := cmd.Start()
+	for _, f := range outputs {
+		f.Close()
+	}
+	if err != nil {
 		return err
 	}
-	go func() {
-		for sig := range sigs {
-			// A terminal sends SIGINT and SIGQUIT to its whole foreground
-			// process group, which includes cmd.
-			if (sig == syscall.SIGINT || sig == syscall.SIGQUIT) && inForeground() {
+	waited := make(chan error, 1)
+	go func() { waited <- cmd.Wait() }()
+	running := true
+	for running || drained != nil {
+		select {
+		case sig := <-sigs:
+			if running && forward(cmd.Process, sig) {
 				continue
 			}
-			cmd.Process.Signal(sig)
+			exitBySignal(sig.(syscall.Signal))
+		case err = <-waited:
+			running = false
+		case <-drained:
+			drained = nil
 		}
-	}()
-	err := cmd.Wait()
-	signal.Stop(sigs)
-	close(sigs)
+	}
 	return err
+}
+
+// forward passes sig on to p and reports whether p may still be running.
+func forward(p *os.Process, sig os.Signal) bool {
+	// A terminal sends SIGINT and SIGQUIT to its whole foreground process
+	// group, which includes p.
+	if (sig == syscall.SIGINT || sig == syscall.SIGQUIT) && inForeground() {
+		return true
+	}
+	return !errors.Is(p.Signal(sig), os.ErrProcessDone)
 }
 
 // inForeground reports whether kakusu is in the foreground process group of
@@ -79,15 +102,19 @@ func inForeground() bool {
 }
 
 // ExitWithStatus ends kakusu the way the command described by state ended:
-// with its exit code, by the same signal if SIGHUP, SIGINT, or SIGTERM killed
-// it, and with exit code 128+N, as a shell reports it, if another signal N
-// killed it.
+// with its exit code, or as exitBySignal does with the signal that killed it.
 func ExitWithStatus(state *os.ProcessState) {
 	status := state.Sys().(syscall.WaitStatus)
 	if !status.Signaled() {
 		os.Exit(status.ExitStatus())
 	}
-	sig := status.Signal()
+	exitBySignal(status.Signal())
+}
+
+// exitBySignal ends kakusu by sig if it is SIGHUP, SIGINT, or SIGTERM and
+// kakusu does not ignore it, and with exit code 128+N, as a shell reports a
+// death by signal N, otherwise.
+func exitBySignal(sig syscall.Signal) {
 	switch sig {
 	case syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM:
 		// Go's default action for these three ends the process by the

@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -410,6 +411,63 @@ func TestRunForwardsSignals(t *testing.T) {
 				t.Errorf("exit %d; want 42 from the trap; stderr %q", r.code, r.stderr)
 			}
 		})
+	}
+}
+
+func TestRunEndsBySignalAfterCommandExits(t *testing.T) {
+	home := newVault(t)
+	envFile := writeEnvFile(t, home)
+	for _, tc := range []struct {
+		sig syscall.Signal
+		// signaled is whether kakusu dies by sig. Otherwise it exits 128+sig.
+		signaled bool
+	}{
+		{syscall.SIGTERM, true},
+		{syscall.SIGINT, true},
+		{syscall.SIGHUP, true},
+		{syscall.SIGQUIT, false},
+		{syscall.SIGUSR1, false},
+	} {
+		t.Run(tc.sig.String(), func(t *testing.T) {
+			// The background sleep keeps the command's output open after the
+			// command exits.
+			p := start(t, home, nil, nil, kakusuBin, "run", "--env", envFile, "--",
+				"sh", "-c", `sleep 600 & echo $$`)
+			t.Cleanup(p.kill)
+			if !p.waitUntil(t, func() bool { return strings.HasSuffix(p.stdout.String(), "\n") }) {
+				t.Fatalf("exited before printing the PID; stdout %q; stderr %q", p.stdout.String(), p.stderr.String())
+			}
+			pid, err := strconv.Atoi(strings.TrimSpace(p.stdout.String()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The PID is gone once kakusu has reaped the command.
+			if !p.waitUntil(t, func() bool { return syscall.Kill(pid, 0) == syscall.ESRCH }) {
+				t.Fatalf("exited before the signal; stderr %q", p.stderr.String())
+			}
+			p.cmd.Process.Signal(tc.sig)
+			r := p.wait(t)
+			if tc.signaled && (!r.status.Signaled() || r.status.Signal() != tc.sig) {
+				t.Errorf("kakusu exit %d, signaled %v by %v; want killed by %v", r.code, r.status.Signaled(), r.status.Signal(), tc.sig)
+			}
+			if !tc.signaled && (r.status.Signaled() || r.code != 128+int(tc.sig)) {
+				t.Errorf("kakusu exit %d, signaled %v by %v; want exit %d", r.code, r.status.Signaled(), r.status.Signal(), 128+int(tc.sig))
+			}
+			if strings.Contains(r.stderr, "goroutine ") {
+				t.Errorf("stderr %q; want no goroutine dump", r.stderr)
+			}
+		})
+	}
+}
+
+func TestRunConcealsOutputAfterCommandExits(t *testing.T) {
+	home := newVault(t)
+	envFile := writeEnvFile(t, home)
+
+	r := mustSucceed(t, kakusu(t, home, nil, nil, "run", "--env", envFile, "--",
+		"sh", "-c", `(sleep 0.3; echo "$X") & exit 0`))
+	if want := placeholder + "\n"; r.stdout != want {
+		t.Errorf("stdout %q; want %q", r.stdout, want)
 	}
 }
 
