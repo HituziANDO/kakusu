@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -287,5 +288,42 @@ func TestAgentClampsTTLTo8Hours(t *testing.T) {
 	r := mustSucceed(t, kakusu(t, home, nil, nil, "agent", "status"))
 	if !strings.Contains(r.stderr, "TTL:       8h0m0s\n") {
 		t.Errorf("stderr %q; want TTL 8h0m0s", r.stderr)
+	}
+}
+
+// wantExportRejected checks that export exited 1, printed nothing for the
+// shell to eval, and ended its error with names quoted and joined by ", ".
+func wantExportRejected(t *testing.T, r result, names ...string) {
+	t.Helper()
+	if r.code != 1 || r.stdout != "" {
+		t.Errorf("exit %d, stdout %q; want exit 1 and empty stdout", r.code, r.stdout)
+	}
+	quoted := make([]string, len(names))
+	for i, n := range names {
+		quoted[i] = strconv.Quote(n)
+	}
+	if want := strings.Join(quoted, ", ") + "\n"; !strings.HasSuffix(r.stderr, want) {
+		t.Errorf("stderr %q; want it to end with %q", r.stderr, want)
+	}
+}
+
+// TestExportEnvRejectsInvalidNames checks that export --env prints nothing
+// when a name in the file is not a shell variable name. export writes names
+// into the statements unquoted, so such a name could make eval run commands:
+// https://github.com/HituziANDO/kakusu/issues/3
+func TestExportEnvRejectsInvalidNames(t *testing.T) {
+	home := newVault(t)
+	envFile := filepath.Join(home, "d.env")
+	for _, name := range []string{
+		"A; echo INJECTED; B",
+	} {
+		t.Run(name, func(t *testing.T) {
+			// The valid line before it must not be printed either.
+			if err := os.WriteFile(envFile, []byte("OK=v\n"+name+"=v\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			r := kakusu(t, home, nil, []string{testPassword}, "export", "--env", envFile)
+			wantExportRejected(t, r, name)
+		})
 	}
 }
