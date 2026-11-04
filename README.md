@@ -111,7 +111,7 @@ kakusu run -- python app.py
 | `kakusu agent status`  | Show agent status                                    |
 | `kakusu agent stop`    | Stop the agent                                       |
 
-When you enter the master password, the agent caches the key in memory. `list`, `set`, `delete`, and `run` use the cached key without asking again. `get`, `show`, `export`, and `passwd` never use the cache and always ask for the master password.
+When you enter the master password, the agent caches the key in memory. `list`, `set`, `delete`, and `run` use the cached key without asking again. `get`, `show`, `export`, and `passwd` never use the cache and always ask for the master password. The password prompt names what the command will do and its target, and after a correct password the key is cached as described above.
 
 The cache TTL (`KAKUSU_TTL`) is extended each time the cache is used, but the cache ends 8 hours after the last password entry however often it is used.
 
