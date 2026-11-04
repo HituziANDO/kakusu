@@ -263,6 +263,53 @@ func TestRunUsesCache(t *testing.T) {
 	}
 }
 
+func TestEnvRefWithoutGroupUsesDefaultGroup(t *testing.T) {
+	home := newVault(t)
+	const value = "SKOPENAI"
+	// set stores a ref without a group in the default group.
+	mustSucceed(t, kakusu(t, home, nil, nil, "set", "openai_key", value))
+	envFile := filepath.Join(home, "b.env")
+	if err := os.WriteFile(envFile, []byte("OPENAI_API_KEY=kks://openai_key\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("run", func(t *testing.T) {
+		r := mustSucceed(t, kakusu(t, home, nil, nil, "run", "--env", envFile, "--", "printenv", "OPENAI_API_KEY"))
+		if want := value + "\n"; r.stdout != want {
+			t.Errorf("stdout %q; want %q", r.stdout, want)
+		}
+	})
+	t.Run("export", func(t *testing.T) {
+		r := mustSucceed(t, kakusu(t, home, nil, []string{testPassword}, "export", "--env", envFile))
+		if want := "export OPENAI_API_KEY='" + value + "'\n"; r.stdout != want {
+			t.Errorf("stdout %q; want %q", r.stdout, want)
+		}
+	})
+}
+
+func TestRunFailsOnMalformedAndUnresolvedRefs(t *testing.T) {
+	home := newVault(t)
+	envFile := filepath.Join(home, "bad.env")
+	env := "# refs\nA=kks://app/missing\nB=kks://app/\n"
+	if err := os.WriteFile(envFile, []byte(env), 0600); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(home, "ran")
+
+	r := kakusu(t, home, nil, nil, "run", "--env", envFile, "--", "touch", marker)
+	if r.code != 1 || r.stdout != "" {
+		t.Errorf("exit %d, stdout %q; want exit 1 and empty stdout", r.code, r.stdout)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Errorf("the command ran (stat %s: %v)", marker, err)
+	}
+	want := "  line 2: A -> kks://app/missing\n" +
+		"  line 3: B -> kks://app/ (malformed; write kks://group/key or kks://key without whitespace)\n"
+	if !strings.Contains(r.stderr, want) {
+		t.Errorf("stderr %q; want it to contain %q", r.stderr, want)
+	}
+}
+
 func TestListPrintsNoPartOfValues(t *testing.T) {
 	home := newVault(t)
 
