@@ -293,8 +293,8 @@ var runCmd = &cobra.Command{
 			ui.Die(i18n.Msgf(i18n.MsgErrEnvFileNotFound, envFile))
 		}
 
-		// Nothing below uses s, so the decrypted vault is not kept while the
-		// command runs; only the values from the env file are.
+		// Nothing below refers to s after the env file is resolved; only the
+		// values from the env file are used while the command runs.
 		s := loadVault(false)
 		injected, secrets, err := vault.ResolveDotenv(envFile, s.Data)
 		if err != nil {
