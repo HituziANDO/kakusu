@@ -12,10 +12,12 @@ import (
 	"github.com/HituziANDO/kakusu/internal/i18n"
 )
 
-// PromptPassword reads a line without echo from the controlling terminal and
-// writes the prompt there, so that the prompt shows even when stderr is
-// redirected. Without a controlling terminal (and on Windows, which has no
-// /dev/tty) it writes the prompt to stderr and reads stdin.
+// PromptPassword reads a password without echo from the controlling terminal
+// and writes the prompt there, so that the prompt shows even when stderr is
+// redirected. If the terminal opens only for reading, the prompt goes to
+// stderr. It reads stdin only when /dev/tty does not open or is not a terminal
+// (without a controlling terminal, and on Windows), and then writes the prompt
+// to stderr.
 func PromptPassword(prompt string) (string, error) {
 	tty, out := openTTY()
 	fmt.Fprint(out, prompt)
@@ -43,15 +45,22 @@ var ttyPath = "/dev/tty"
 // not a terminal would overwrite it: on Windows, /dev/tty is \dev\tty on the
 // current drive, and a container can put a regular file at /dev/tty. out is
 // where the prompt and the messages about the input go: the terminal when it
-// opens, stderr otherwise.
+// opens for writing, stderr otherwise.
 func openTTY() (*os.File, io.Writer) {
 	tty, err := os.OpenFile(ttyPath, os.O_RDWR, 0)
+	writable := err == nil
+	if !writable {
+		tty, err = os.Open(ttyPath)
+	}
 	if err != nil {
 		return nil, os.Stderr
 	}
 	if !term.IsTerminal(int(tty.Fd())) {
 		tty.Close()
 		return nil, os.Stderr
+	}
+	if !writable {
+		return tty, os.Stderr
 	}
 	return tty, tty
 }
