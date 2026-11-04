@@ -253,10 +253,10 @@ func TestPasswdChangesPasswordWithCurrentPassword(t *testing.T) {
 	}
 }
 
-// internal/crypto/testdata/secrets-v0.5.0.enc was written by kakusu v0.5.0
-// with the password "golden-fixture-pw" and `set app/db_password
-// dummy-db-pass`. Reading it from the vault path checks that the vault still
-// splits the file as salt ‖ nonce ‖ ciphertext, as released versions wrote it.
+// internal/crypto/testdata/secrets-v0.5.0.enc was written by kakusu v0.5.0;
+// internal/crypto/crypto_test.go says how. Reading it from the vault path
+// checks that the vault still splits the file as salt ‖ nonce ‖ ciphertext,
+// as released versions wrote it.
 func TestGetReadsVaultWrittenByV050(t *testing.T) {
 	home, err := os.MkdirTemp("", "kk")
 	if err != nil {
