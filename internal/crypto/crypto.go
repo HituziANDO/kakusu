@@ -3,7 +3,7 @@ package crypto
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/hmac"
+	"crypto/pbkdf2"
 	"crypto/rand"
 	"crypto/sha256"
 	"errors"
@@ -19,37 +19,7 @@ const (
 
 // DeriveKey derives an AES-256 key using PBKDF2-HMAC-SHA256 (RFC 2898).
 func DeriveKey(password string, salt []byte) ([]byte, error) {
-	prf := hmac.New(sha256.New, []byte(password))
-	hashLen := prf.Size()
-	numBlocks := (KeySize + hashLen - 1) / hashLen
-
-	var buf [4]byte
-	dk := make([]byte, 0, numBlocks*hashLen)
-	U := make([]byte, hashLen)
-	for block := 1; block <= numBlocks; block++ {
-		prf.Reset()
-		prf.Write(salt)
-		buf[0] = byte(block >> 24)
-		buf[1] = byte(block >> 16)
-		buf[2] = byte(block >> 8)
-		buf[3] = byte(block)
-		prf.Write(buf[:4])
-		U = U[:0]
-		U = prf.Sum(U)
-		T := make([]byte, hashLen)
-		copy(T, U)
-		for n := 2; n <= Pbkdf2Iterations; n++ {
-			prf.Reset()
-			prf.Write(U)
-			U = U[:0]
-			U = prf.Sum(U)
-			for x := range T {
-				T[x] ^= U[x]
-			}
-		}
-		dk = append(dk, T...)
-	}
-	return dk[:KeySize], nil
+	return pbkdf2.Key(sha256.New, password, salt, Pbkdf2Iterations, KeySize)
 }
 
 func EncryptData(plaintext, key []byte) ([]byte, error) {
