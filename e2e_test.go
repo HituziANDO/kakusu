@@ -380,6 +380,27 @@ func TestRunNoMaskingPrintsValue(t *testing.T) {
 	}
 }
 
+func TestRunReplacesInheritedVariable(t *testing.T) {
+	home := newVault(t)
+	envFile := writeEnvFile(t, home, "DB=kks://app/db_password")
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"no_masking", []string{"--no-masking"}, secrets["app/db_password"] + "\n"},
+		{"concealed", nil, placeholder + "\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := append(append([]string{"run", "--env", envFile}, tc.args...), "--", "printenv", "DB")
+			r := mustSucceed(t, kakusu(t, home, []string{"DB=old"}, nil, args...))
+			if r.stdout != tc.want {
+				t.Errorf("stdout %q; want %q", r.stdout, tc.want)
+			}
+		})
+	}
+}
+
 func TestRunExitsAsCommandDid(t *testing.T) {
 	home := newVault(t)
 	envFile := writeEnvFile(t, home)

@@ -308,7 +308,17 @@ var runCmd = &cobra.Command{
 		sort.Strings(keys)
 		fmt.Fprintf(os.Stderr, "✓ %s\n", i18n.Msgf(i18n.MsgInjected, strings.Join(keys, ", ")))
 
-		env := os.Environ()
+		// Drop the inherited variables that the env file sets. With both,
+		// the value the command sees would depend on the mode: on Unix,
+		// ExecRun passes both and getenv returns the first, while os/exec
+		// keeps the last.
+		var env []string
+		for _, kv := range os.Environ() {
+			k, _, _ := strings.Cut(kv, "=")
+			if _, ok := injected[k]; !ok {
+				env = append(env, kv)
+			}
+		}
 		for k, v := range injected {
 			env = append(env, k+"="+v)
 		}
