@@ -35,12 +35,22 @@ func PromptPassword(prompt string) (string, error) {
 	return strings.TrimRight(pw, "\n"), err
 }
 
+// ttyPath is the controlling terminal. Tests point it at a regular file.
+var ttyPath = "/dev/tty"
+
 // openTTY opens the controlling terminal to read a password from, or returns
-// nil when it does not open. out is where the prompt and the messages about
-// the input go: the terminal when it opens, stderr otherwise.
+// nil when it does not open or is not a terminal. Writing to a file that is
+// not a terminal would overwrite it: on Windows, /dev/tty is \dev\tty on the
+// current drive, and a container can put a regular file at /dev/tty. out is
+// where the prompt and the messages about the input go: the terminal when it
+// opens, stderr otherwise.
 func openTTY() (*os.File, io.Writer) {
-	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	tty, err := os.OpenFile(ttyPath, os.O_RDWR, 0)
 	if err != nil {
+		return nil, os.Stderr
+	}
+	if !term.IsTerminal(int(tty.Fd())) {
+		tty.Close()
 		return nil, os.Stderr
 	}
 	return tty, tty
