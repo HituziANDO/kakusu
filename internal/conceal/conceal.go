@@ -11,14 +11,18 @@ import (
 const Placeholder = "<concealed by kakusu>"
 
 // Writer writes to an underlying writer with every occurrence of its values
-// replaced by Placeholder. A value split across Write calls is still
-// replaced: Write holds back only the trailing bytes that are the start of a
-// value, and Flush writes them when the stream ends.
+// replaced by Placeholder. Occurrences that overlap or touch, of one value or
+// of different ones, form one region, and one Placeholder replaces the whole
+// region. A value split across Write calls is still replaced: Write holds back
+// only the trailing bytes that are the start of a value, and Flush writes them
+// when the stream ends.
 type Writer struct {
 	w      io.Writer
 	values [][]byte  // longest first, so the first match at a position is the longest
 	first  [256]bool // first bytes of values, so that other bytes are passed on quickly
 	held   []byte
+	off    int64 // offset of held in the stream
+	end    int64 // offset in the stream where the last region ends, or -1
 }
 
 // NewWriter returns a Writer that conceals each distinct non-empty value in
@@ -33,7 +37,7 @@ func NewWriter(w io.Writer, values []string) *Writer {
 		}
 	}
 	sort.Slice(vs, func(i, j int) bool { return len(vs[i]) > len(vs[j]) })
-	cw := &Writer{w: w, values: vs}
+	cw := &Writer{w: w, values: vs, end: -1}
 	for _, v := range vs {
 		cw.first[v[0]] = true
 	}
@@ -66,23 +70,33 @@ func (w *Writer) Flush() error {
 	return err
 }
 
-// conceal returns buf with values replaced. Unless final, it stops where the
-// rest of buf is a proper prefix of a value and returns that rest as held.
+// conceal returns buf, which starts at w.off in the stream, with values
+// replaced. Unless final, it stops where the rest of buf is a proper prefix
+// of a value and returns that rest as held. Every position before that is
+// checked for a value, including positions inside a region, so that an
+// occurrence starting there extends the region.
 func (w *Writer) conceal(buf []byte, final bool) (out, held []byte) {
-	for i := 0; i < len(buf); {
+	for i := range buf {
+		pos := w.off + int64(i)
 		if w.first[buf[i]] {
 			if !final && w.startsValue(buf[i:]) {
+				w.off = pos
 				return out, buf[i:]
 			}
-			if n := w.match(buf[i:]); n > 0 {
-				out = append(out, Placeholder...)
-				i += n
-				continue
+			if n := w.match(buf[i:]); n > 0 && pos+int64(n) > w.end {
+				// A region that ends before pos has ended, so this
+				// occurrence starts a new one.
+				if pos > w.end {
+					out = append(out, Placeholder...)
+				}
+				w.end = pos + int64(n)
 			}
 		}
-		out = append(out, buf[i])
-		i++
+		if pos >= w.end {
+			out = append(out, buf[i])
+		}
 	}
+	w.off += int64(len(buf))
 	return out, nil
 }
 
