@@ -223,6 +223,27 @@ func TestGetKeyExtendsTTL(t *testing.T) {
 	}
 }
 
+// This test needs real time. The wall clock stands still, so the wall-clock
+// expiry never passes, and only the monotonic expiry, which only real time
+// moves, can end the TTL or show that GET_KEY extends it.
+func TestGetKeyExtendsTTLOnMonotonicClock(t *testing.T) {
+	startServe(t, time.Second, 8*time.Hour, newFakeWall().now)
+	mustSetKey(t)
+
+	// GET_KEY every 100ms keeps the key past the TTL. This fails only if two
+	// GET_KEYs are more than the TTL apart.
+	for start := time.Now(); time.Since(start) < 1500*time.Millisecond; time.Sleep(100 * time.Millisecond) {
+		if mustGetKey(t) == nil {
+			t.Fatalf("GET_KEY %v after SET_KEY: NO_KEY; want the key", time.Since(start))
+		}
+	}
+	// With no GET_KEY for longer than the TTL, the key expires.
+	time.Sleep(1200 * time.Millisecond)
+	if mustGetKey(t) != nil {
+		t.Error("GET_KEY 1.2s after the previous one: got the key; want NO_KEY")
+	}
+}
+
 func TestServeClampsTTLToMaxKeyAge(t *testing.T) {
 	startServe(t, 8*time.Hour+time.Minute, 8*time.Hour, newFakeWall().now)
 	if resp := mustQueryStatus(t); resp.TTLSeconds != 8*60*60 {
