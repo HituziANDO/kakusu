@@ -127,6 +127,26 @@ func TestKeyExpiresTTLAfterGetKeyOnWallClock(t *testing.T) {
 	}
 }
 
+// Moving the wall clock back must not leave more than the TTL: the monotonic
+// clock, which does not move back, still bounds it.
+func TestWallClockMovingBackDoesNotExtendTTL(t *testing.T) {
+	for _, last := range []string{"SET_KEY", "GET_KEY"} {
+		t.Run(last, func(t *testing.T) {
+			wall := newFakeWall()
+			startServe(t, time.Hour, 8*time.Hour, wall.now)
+			mustSetKey(t)
+			if last == "GET_KEY" && mustGetKey(t) == nil {
+				t.Fatal("GET_KEY right after SET_KEY: NO_KEY; want the key")
+			}
+
+			wall.advance(-30 * time.Minute)
+			if resp := mustQueryStatus(t); !resp.HasKey || resp.RemainingSeconds > resp.TTLSeconds {
+				t.Errorf("STATUS after the wall clock moved back 30m: HasKey %v, RemainingSeconds %d; want true, at most TTLSeconds %d", resp.HasKey, resp.RemainingSeconds, resp.TTLSeconds)
+			}
+		})
+	}
+}
+
 func TestKeyExpiresMaxKeyAgeAfterSetKeyOnWallClock(t *testing.T) {
 	wall := newFakeWall()
 	startServe(t, 8*time.Hour, 8*time.Hour, wall.now)

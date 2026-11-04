@@ -76,16 +76,22 @@ func serve(ttlDur, maxKeyAge time.Duration, wallNow func() time.Time) {
 	platform.IgnoreHUP()
 
 	var cachedKey, cachedSalt []byte
-	// expiresAt slides on GET_KEY. keyDeadline is set on SET_KEY. Both are on
-	// the wall clock, so they pass even if the system sleeps through them.
-	var expiresAt, keyDeadline time.Time
+	// expiresAt (wall clock) and expiresMono (monotonic clock) slide on
+	// GET_KEY. keyDeadline is set on SET_KEY and is on the wall clock.
+	var expiresAt, expiresMono, keyDeadline time.Time
 
 	// keyRemaining is how long the cached key stays valid: until the TTL
-	// expires or keyDeadline passes, whichever comes first. Every request
-	// checks it, because keyTimer can fire late after a sleep.
+	// expires on either clock or keyDeadline passes, whichever comes first.
+	// The wall clock ends the TTL even if the system sleeps through it, and the
+	// monotonic clock keeps the TTL from growing when the wall clock moves
+	// back. Every request checks it, because keyTimer can fire late after a
+	// sleep.
 	keyRemaining := func() time.Duration {
 		now := wallNow()
 		r := expiresAt.Sub(now)
+		if d := time.Until(expiresMono); d < r {
+			r = d
+		}
 		if d := keyDeadline.Sub(now); d < r {
 			r = d
 		}
@@ -99,6 +105,7 @@ func serve(ttlDur, maxKeyAge time.Duration, wallNow func() time.Time) {
 		cachedKey = nil
 		cachedSalt = nil
 		expiresAt = time.Time{}
+		expiresMono = time.Time{}
 	}
 
 	keyTimer := time.NewTimer(0)
@@ -127,6 +134,7 @@ func serve(ttlDur, maxKeyAge time.Duration, wallNow func() time.Time) {
 					resp.Key = base64.StdEncoding.EncodeToString(cachedKey)
 					resp.Salt = base64.StdEncoding.EncodeToString(cachedSalt)
 					expiresAt = wallNow().Add(ttlDur)
+					expiresMono = time.Now().Add(ttlDur)
 					stopTimer(keyTimer)
 					keyTimer.Reset(keyRemaining())
 				} else {
@@ -144,6 +152,7 @@ func serve(ttlDur, maxKeyAge time.Duration, wallNow func() time.Time) {
 				cachedKey, _ = base64.StdEncoding.DecodeString(req.Key)
 				cachedSalt, _ = base64.StdEncoding.DecodeString(req.Salt)
 				expiresAt = wallNow().Add(ttlDur)
+				expiresMono = time.Now().Add(ttlDur)
 				keyDeadline = wallNow().Add(maxKeyAge)
 				stopTimer(keyTimer)
 				keyTimer.Reset(ttlDur)
