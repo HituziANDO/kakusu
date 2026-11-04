@@ -99,15 +99,18 @@ func lockVault() {
 		ui.Die(err.Error())
 	}
 	locked, err := platform.TryLock(f)
-	if err == nil && !locked {
-		fmt.Fprintln(os.Stderr, i18n.Msgf(i18n.MsgWaitingForLock, path))
-		err = platform.Lock(f)
-	}
 	if err != nil {
 		if !platform.LockUnsupported(err) {
 			ui.Die(fmt.Sprintf("%s: %v", path, err))
 		}
 		fmt.Fprintln(os.Stderr, i18n.Msgf(i18n.MsgLockUnsupported, path, err))
+	} else if !locked {
+		fmt.Fprintln(os.Stderr, i18n.Msgf(i18n.MsgWaitingForLock, path))
+		// Another process holds the lock, so this file can be locked: any
+		// error here is a real failure, not a filesystem without locks.
+		if err := platform.Lock(f); err != nil {
+			ui.Die(fmt.Sprintf("%s: %v", path, err))
+		}
 	}
 	vaultLock = f
 }
