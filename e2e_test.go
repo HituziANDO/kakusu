@@ -540,6 +540,9 @@ func TestSetSavesNothingWhenVaultChangedAfterLoad(t *testing.T) {
 			} else if err != nil || !bytes.Equal(got, other) {
 				t.Errorf("vault read error %v, equal %v; want the bytes written during set kept", err, bytes.Equal(got, other))
 			}
+			if tmps, _ := filepath.Glob(filepath.Join(home, ".kakusu", ".secrets.enc.tmp.*")); len(tmps) != 0 {
+				t.Errorf("temporary files %v left; want none", tmps)
+			}
 		})
 	}
 }

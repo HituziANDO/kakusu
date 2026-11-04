@@ -26,8 +26,8 @@ type State struct {
 	Data Data
 	Key  []byte
 	Salt []byte
-	// Loaded is the vault file as the command read it. Save writes nothing if
-	// the file no longer matches it.
+	// Loaded is the vault file as the command read it. Save leaves the file as
+	// it is if it no longer matches.
 	Loaded Snapshot
 }
 
@@ -163,9 +163,9 @@ func LoadKakusu(password string, allowCreate, useCache bool, promptPw func(strin
 }
 
 // Save writes the vault atomically to disk. If the vault file no longer matches
-// s.Loaded, it writes nothing and returns an error. Write commands hold a lock
-// while they run (lockVault in internal/cli/commands.go), but a sync service,
-// for example, does not take it.
+// s.Loaded, it leaves the file as it is and returns an error. Write commands
+// hold a lock while they run (lockVault in internal/cli/commands.go), but a
+// sync service, for example, does not take it.
 func (s *State) Save() error {
 	dir := config.KakusuDir()
 	if err := os.MkdirAll(dir, 0700); err != nil {
@@ -182,14 +182,6 @@ func (s *State) Save() error {
 	// A new slice: s.Salt can share its array with the bytes LoadKakusu read.
 	content := slices.Concat(s.Salt, blob)
 	path := config.KakusuFile()
-
-	current, err := ReadSnapshot()
-	if err != nil {
-		return err
-	}
-	if current != s.Loaded {
-		return errors.New(i18n.Msg(i18n.MsgErrVaultChanged))
-	}
 
 	tmpFile, err := os.CreateTemp(dir, ".secrets.enc.tmp.*")
 	if err != nil {
@@ -214,6 +206,16 @@ func (s *State) Save() error {
 	if err := os.Chmod(tmpPath, 0600); err != nil {
 		os.Remove(tmpPath)
 		return err
+	}
+	// Check as late as possible, so that a change has little time to slip in.
+	current, err := ReadSnapshot()
+	if err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	if current != s.Loaded {
+		os.Remove(tmpPath)
+		return errors.New(i18n.Msg(i18n.MsgErrVaultChanged))
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
 		os.Remove(tmpPath)
