@@ -24,10 +24,11 @@ func Lock(f *os.File) error {
 	return lockFileEx(f, windows.LOCKFILE_EXCLUSIVE_LOCK)
 }
 
-// LockUnsupported reports whether err from TryLock or Lock means that the
-// filesystem cannot lock files.
+// LockUnsupported reports whether err from TryLock means that the filesystem
+// cannot lock files. errors.ErrUnsupported matches ERROR_NOT_SUPPORTED and
+// ERROR_CALL_NOT_IMPLEMENTED, among others.
 func LockUnsupported(err error) bool {
-	return errors.Is(err, windows.ERROR_NOT_SUPPORTED) || errors.Is(err, windows.ERROR_CALL_NOT_IMPLEMENTED)
+	return errors.Is(err, errors.ErrUnsupported)
 }
 
 // lockFileEx locks the whole file. The lock belongs to the open handle and is

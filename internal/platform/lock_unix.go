@@ -23,10 +23,11 @@ func Lock(f *os.File) error {
 	return flock(f, syscall.LOCK_EX)
 }
 
-// LockUnsupported reports whether err from TryLock or Lock means that the
-// filesystem cannot lock files.
+// LockUnsupported reports whether err from TryLock means that the filesystem
+// cannot lock files. errors.ErrUnsupported matches ENOSYS, ENOTSUP, and
+// EOPNOTSUPP.
 func LockUnsupported(err error) bool {
-	return errors.Is(err, syscall.ENOLCK) || errors.Is(err, syscall.ENOTSUP) || errors.Is(err, syscall.EOPNOTSUPP)
+	return errors.Is(err, errors.ErrUnsupported) || errors.Is(err, syscall.ENOLCK)
 }
 
 // flock calls flock(2) again when a signal interrupts it. The lock belongs to
