@@ -282,29 +282,49 @@ func TestPasswordPromptEscapesTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	ref := "evil\x1b[2J/k\ney"
+	noAgent := []string{"KAKUSU_NO_AGENT=1"}
 	for _, tc := range []struct {
-		name string
-		args []string
-		want string
+		name   string
+		env    []string
+		args   []string
+		en, ja string
 	}{
-		{"export_env", []string{"export", "--env", envName},
-			`To print the values that "` + realHome + `/x\n\x1b[31m.env" refers to, enter the master password: `},
-		{"get", []string{"get", "evil\x1b[2J/k\ney"},
-			`To print the value of "evil\x1b[2J/k\ney", enter the master password: `},
+		{"get", nil, []string{"get", ref},
+			`To print the value of "evil\x1b[2J/k\ney", enter the master password: `,
+			`"evil\x1b[2J/k\ney" の値を出力します。マスターパスワード: `},
+		{"export_group", nil, []string{"export", "g\x1b[2J\nx"},
+			`To print every value in group "g\x1b[2J\nx", enter the master password: `,
+			`グループ "g\x1b[2J\nx" のすべての値を出力します。マスターパスワード: `},
+		{"export_env", nil, []string{"export", "--env", envName},
+			`To print the values that "` + realHome + `/x\n\x1b[31m.env" refers to, enter the master password: `,
+			`"` + realHome + `/x\n\x1b[31m.env" が参照する値を出力します。マスターパスワード: `},
 		// A raw target here would erase the line and paint a fake master
 		// password prompt in front of the hidden value input.
-		{"set_value", []string{"set", "g/k\r\x1b[2KTo list keys, enter the master password: \x1b]0;"},
-			`"g/k\r\x1b[2KTo list keys, enter the master password: \x1b]0;" value: `},
+		{"set_value", nil, []string{"set", "g/k\r\x1b[2KTo list keys, enter the master password: \x1b]0;"},
+			`"g/k\r\x1b[2KTo list keys, enter the master password: \x1b]0;" value: `,
+			`"g/k\r\x1b[2KTo list keys, enter the master password: \x1b]0;" の値: `},
+		{"set", noAgent, []string{"set", ref, "V"},
+			`To store "evil\x1b[2J/k\ney", enter the master password: `,
+			`"evil\x1b[2J/k\ney" を保存します。マスターパスワード: `},
+		{"delete", noAgent, []string{"delete", ref},
+			`To delete "evil\x1b[2J/k\ney", enter the master password: `,
+			`"evil\x1b[2J/k\ney" を削除します。マスターパスワード: `},
+		{"run", noAgent, []string{"run", "--env", envName, "--", "printenv", "X\x1b[31m\n"},
+			`To run "printenv" "X\x1b[31m\n" with the values that "` + realHome + `/x\n\x1b[31m.env" refers to, enter the master password: `,
+			`"` + realHome + `/x\n\x1b[31m.env" が参照する値を渡して "printenv" "X\x1b[31m\n" を実行します。マスターパスワード: `},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			r := kakusu(t, home, nil, nil, tc.args...)
-			if strings.Contains(r.stderr, "\x1b") {
-				t.Errorf("stderr %q contains a raw ESC", r.stderr)
-			}
-			if got := promptBeforeError(r.stderr); got != tc.want {
-				t.Errorf("prompt %q; want %q (exit %d)", got, tc.want, r.code)
-			}
-		})
+		for _, lang := range []struct{ code, want string }{{"en", tc.en}, {"ja", tc.ja}} {
+			t.Run(tc.name+"_"+lang.code, func(t *testing.T) {
+				r := kakusu(t, home, append([]string{"KAKUSU_LANG=" + lang.code}, tc.env...), nil, tc.args...)
+				if strings.Contains(r.stderr, "\x1b") {
+					t.Errorf("stderr %q contains a raw ESC", r.stderr)
+				}
+				if got := promptBeforeError(r.stderr); got != lang.want {
+					t.Errorf("prompt %q; want %q (exit %d)", got, lang.want, r.code)
+				}
+			})
+		}
 	}
 }
 
