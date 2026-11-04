@@ -75,7 +75,7 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
-var promptRe = regexp.MustCompile(`(?:password|Confirm): `)
+var promptRe = regexp.MustCompile(`(?:password|Confirm|\[y/N\]): `)
 
 // kakusuCmd prepares the binary to run under home with only this environment
 // and extraEnv, in a new session.
@@ -578,12 +578,11 @@ func TestConcurrentSetsCreatingVaultKeepBothValues(t *testing.T) {
 	b.waitFor(waitingRe)
 	a.send(testPassword, testPassword)
 	mustSucceed(t, a.wait())
-	// b loads the vault that a created, so it asks for that vault's password.
-	b.waitFor(masterPromptRe)
+	b.waitFor(promptRe)
 	b.send(testPassword)
-	rb := mustSucceed(t, b.wait())
-	if strings.Contains(rb.stderr, "New master password: ") {
-		t.Errorf("b stderr %q; want no new password prompt", rb.stderr)
+	// b loads the vault that a created, so it asks for that vault's password.
+	if rb := b.wait(); rb.code != 0 || !masterPromptRe.MatchString(rb.stderr) || strings.Contains(rb.stderr, "New master password: ") {
+		t.Errorf("b: exit %d, stderr %q; want exit 0 after only the master password prompt", rb.code, rb.stderr)
 	}
 
 	r := mustSucceed(t, kakusu(t, home, noAgent, []string{testPassword}, "list", "race"))
@@ -613,4 +612,10 @@ func TestSetWarnsAndSavesWhenLockIsUnsupported(t *testing.T) {
 	if r := mustSucceed(t, kakusu(t, home, noAgent, []string{testPassword}, "get", "race/a")); r.stdout != "1\n" {
 		t.Errorf("get stdout %q; want %q", r.stdout, "1\n")
 	}
+}
+
+func TestInitOverwritesExistingVault(t *testing.T) {
+	home := newNoAgentVault(t)
+	mustSucceed(t, kakusu(t, home, noAgent, []string{"y", "NEWPASS12", "NEWPASS12"}, "init"))
+	mustSucceed(t, kakusu(t, home, noAgent, []string{"NEWPASS12"}, "list"))
 }
