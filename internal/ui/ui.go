@@ -11,15 +11,20 @@ import (
 	"github.com/HituziANDO/kakusu/internal/i18n"
 )
 
+// PromptPassword reads a line without echo from the controlling terminal and
+// writes the prompt there, so that the prompt shows even when stderr is
+// redirected. Without a controlling terminal (and on Windows, which has no
+// /dev/tty) it writes the prompt to stderr and reads stdin.
 func PromptPassword(prompt string) (string, error) {
-	fmt.Fprint(os.Stderr, prompt)
-	tty, err := os.Open("/dev/tty")
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err == nil {
 		defer tty.Close()
+		fmt.Fprint(tty, prompt)
 		pw, err := term.ReadPassword(int(tty.Fd()))
-		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(tty)
 		return string(pw), err
 	}
+	fmt.Fprint(os.Stderr, prompt)
 	if term.IsTerminal(int(os.Stdin.Fd())) {
 		pw, err := term.ReadPassword(int(os.Stdin.Fd()))
 		fmt.Fprintln(os.Stderr)
