@@ -3,6 +3,7 @@ package ui
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -16,23 +17,42 @@ import (
 // redirected. Without a controlling terminal (and on Windows, which has no
 // /dev/tty) it writes the prompt to stderr and reads stdin.
 func PromptPassword(prompt string) (string, error) {
-	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
-	if err == nil {
+	tty, out := openTTY()
+	fmt.Fprint(out, prompt)
+	if tty != nil {
 		defer tty.Close()
-		fmt.Fprint(tty, prompt)
 		pw, err := term.ReadPassword(int(tty.Fd()))
-		fmt.Fprintln(tty)
+		fmt.Fprintln(out)
 		return string(pw), err
 	}
-	fmt.Fprint(os.Stderr, prompt)
 	if term.IsTerminal(int(os.Stdin.Fd())) {
 		pw, err := term.ReadPassword(int(os.Stdin.Fd()))
-		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(out)
 		return string(pw), err
 	}
 	reader := bufio.NewReader(os.Stdin)
 	pw, err := reader.ReadString('\n')
 	return strings.TrimRight(pw, "\n"), err
+}
+
+// openTTY opens the controlling terminal to read a password from, or returns
+// nil when it does not open. out is where the prompt and the messages about
+// the input go: the terminal when it opens, stderr otherwise.
+func openTTY() (*os.File, io.Writer) {
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		return nil, os.Stderr
+	}
+	return tty, tty
+}
+
+// printNotice writes msg as a line to where PromptPassword writes its prompt.
+func printNotice(msg string) {
+	tty, out := openTTY()
+	if tty != nil {
+		defer tty.Close()
+	}
+	fmt.Fprintln(out, msg)
 }
 
 func PromptNewPassword() (string, error) {
@@ -42,7 +62,7 @@ func PromptNewPassword() (string, error) {
 			return "", err
 		}
 		if len(pw) < 8 {
-			fmt.Fprintln(os.Stderr, i18n.Msg(i18n.MsgPromptMinLength))
+			printNotice(i18n.Msg(i18n.MsgPromptMinLength))
 			continue
 		}
 		pw2, err := PromptPassword(i18n.Msg(i18n.MsgPromptConfirm))
@@ -52,7 +72,7 @@ func PromptNewPassword() (string, error) {
 		if pw == pw2 {
 			return pw, nil
 		}
-		fmt.Fprintln(os.Stderr, i18n.Msg(i18n.MsgPromptMismatch))
+		printNotice(i18n.Msg(i18n.MsgPromptMismatch))
 	}
 }
 
