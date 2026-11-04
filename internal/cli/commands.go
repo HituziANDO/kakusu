@@ -102,7 +102,10 @@ var initCmd = &cobra.Command{
 		if _, err := io.ReadFull(rand.Reader, salt); err != nil {
 			ui.Die(err.Error())
 		}
-		key := crypto.DeriveKey(pw, salt)
+		key, err := crypto.DeriveKey(pw, salt)
+		if err != nil {
+			ui.Die(err.Error())
+		}
 		s := &vault.State{Data: make(vault.Data), Key: key, Salt: salt}
 		if err := s.Save(); err != nil {
 			ui.Die(err.Error())
@@ -405,7 +408,10 @@ var passwdCmd = &cobra.Command{
 		if _, err := io.ReadFull(rand.Reader, newSalt); err != nil {
 			ui.Die(err.Error())
 		}
-		s.Key = crypto.DeriveKey(newPw, newSalt)
+		s.Key, err = crypto.DeriveKey(newPw, newSalt)
+		if err != nil {
+			ui.Die(err.Error())
+		}
 		s.Salt = newSalt
 		if err := s.Save(); err != nil {
 			ui.Die(err.Error())

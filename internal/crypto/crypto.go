@@ -18,7 +18,7 @@ const (
 )
 
 // DeriveKey derives an AES-256 key using PBKDF2-HMAC-SHA256 (RFC 2898).
-func DeriveKey(password string, salt []byte) []byte {
+func DeriveKey(password string, salt []byte) ([]byte, error) {
 	prf := hmac.New(sha256.New, []byte(password))
 	hashLen := prf.Size()
 	numBlocks := (KeySize + hashLen - 1) / hashLen
@@ -49,7 +49,7 @@ func DeriveKey(password string, salt []byte) []byte {
 		}
 		dk = append(dk, T...)
 	}
-	return dk[:KeySize]
+	return dk[:KeySize], nil
 }
 
 func EncryptData(plaintext, key []byte) ([]byte, error) {
