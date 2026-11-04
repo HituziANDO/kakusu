@@ -403,10 +403,13 @@ func newRelay(out io.Writer, secrets []string) (*relay, error) {
 }
 
 // copy copies until every process holding w has closed it, and then writes
-// the bytes that the conceal.Writer holds.
+// the bytes that the conceal.Writer holds. If writing to out fails, it stops
+// and closes r, so that the command's next write fails as it would if the
+// command wrote to out itself.
 func (r *relay) copy() {
-	io.Copy(r.cw, r.r)
-	r.cw.Flush()
+	if _, err := io.Copy(r.cw, r.r); err == nil {
+		r.cw.Flush()
+	}
 	r.r.Close()
 }
 

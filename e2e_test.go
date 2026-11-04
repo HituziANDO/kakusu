@@ -9,6 +9,7 @@ package main
 // stdin.
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"io"
@@ -89,12 +90,22 @@ type process struct {
 // means /dev/null.
 func start(t *testing.T, home string, extraEnv []string, stdin io.Reader, name string, args ...string) *process {
 	t.Helper()
+	return startWithStdout(t, home, extraEnv, stdin, nil, name, args...)
+}
+
+// startWithStdout is start with stdout as the child's stdout, which p.stdout
+// then does not receive. A nil stdout means p.stdout.
+func startWithStdout(t *testing.T, home string, extraEnv []string, stdin io.Reader, stdout *os.File, name string, args ...string) *process {
+	t.Helper()
 	p := &process{cmd: exec.Command(name, args...), done: make(chan struct{}), deadline: time.After(10 * time.Second)}
 	p.cmd.Dir = home
 	p.cmd.Env = append([]string{"HOME=" + home, "PATH=" + os.Getenv("PATH"), "KAKUSU_LANG=en"}, extraEnv...)
 	p.cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	p.cmd.Stdin = stdin
 	p.cmd.Stdout = &p.stdout
+	if stdout != nil {
+		p.cmd.Stdout = stdout
+	}
 	p.cmd.Stderr = &p.stderr
 	if err := p.cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -468,6 +479,39 @@ func TestRunConcealsOutputAfterCommandExits(t *testing.T) {
 		"sh", "-c", `(sleep 0.3; echo "$X") & exit 0`))
 	if want := placeholder + "\n"; r.stdout != want {
 		t.Errorf("stdout %q; want %q", r.stdout, want)
+	}
+}
+
+func TestRunWaitsForCommandAfterReaderExits(t *testing.T) {
+	home := newVault(t)
+	envFile := writeEnvFile(t, home)
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	// As with | head -n 1, the reader exits after the first line, and the
+	// command writes again after that.
+	p := startWithStdout(t, home, nil, nil, w, kakusuBin, "run", "--env", envFile, "--",
+		"sh", "-c", `echo one; sleep 0.3; echo two; sleep 0.3; touch "$HOME/m1"; echo three; touch "$HOME/m2"`)
+	w.Close()
+	t.Cleanup(p.kill)
+	if line, err := bufio.NewReader(r).ReadString('\n'); line != "one\n" {
+		t.Fatalf("read %q, %v; want %q", line, err, "one\n")
+	}
+	r.Close()
+	res := p.wait(t)
+	// kakusu gets EPIPE for "two" and closes the command's pipe, so "three"
+	// kills the command by SIGPIPE, as it would without kakusu in between.
+	if _, err := os.Stat(filepath.Join(home, "m1")); err != nil {
+		t.Errorf("kakusu exited before the command; stderr %q", res.stderr)
+	}
+	if _, err := os.Stat(filepath.Join(home, "m2")); err == nil {
+		t.Error("the command wrote after the reader exited without failing")
+	}
+	if res.status.Signaled() || res.code != 128+int(syscall.SIGPIPE) {
+		t.Errorf("kakusu exit %d, signaled %v by %v; want exit %d", res.code, res.status.Signaled(), res.status.Signal(), 128+int(syscall.SIGPIPE))
 	}
 }
 

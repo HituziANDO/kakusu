@@ -26,8 +26,8 @@ func ExecRun(bin string, args []string, env []string) error {
 }
 
 // forwardedSignals are the signals that RunChild passes on to the command.
-// SIGPIPE, SIGTSTP, and SIGWINCH are not caught: the command gets them
-// itself, from its own pipe or from the terminal.
+// SIGTSTP and SIGWINCH are not caught: the command gets them itself from the
+// terminal. RunChild catches SIGPIPE without passing it on.
 var forwardedSignals = []os.Signal{
 	syscall.SIGHUP, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGTERM, syscall.SIGUSR1, syscall.SIGUSR2,
 }
@@ -51,6 +51,10 @@ func RunChild(cmd *exec.Cmd, outputs []*os.File, drained <-chan struct{}) error 
 		}
 	}
 	defer signal.Stop(sigs)
+	// With SIGPIPE caught, a write to a closed stdout or stderr returns EPIPE
+	// instead of killing kakusu, so that kakusu stays until cmd ends. cmd
+	// still starts with the default action for SIGPIPE.
+	signal.Notify(make(chan os.Signal, 1), syscall.SIGPIPE)
 	err := cmd.Start()
 	for _, f := range outputs {
 		f.Close()
