@@ -156,21 +156,20 @@ func mustSucceed(t *testing.T, r result) result {
 
 // bgKakusu is a child started by startKakusu.
 type bgKakusu struct {
-	t        *testing.T
-	args     []string
-	cmd      *exec.Cmd
-	lines    chan string
-	stdout   bytes.Buffer
-	stderr   syncBuffer
-	done     chan struct{}
-	deadline time.Time
+	t      *testing.T
+	args   []string
+	cmd    *exec.Cmd
+	lines  chan string
+	stdout bytes.Buffer
+	stderr syncBuffer
+	done   chan struct{}
 }
 
 // startKakusu starts the binary as kakusu does but returns at once, so that the
 // test can hold the child at a prompt or while it waits for the lock, and run
 // other children meanwhile. Tests synchronize on what children print; the
-// 10-second deadline is only a safety net. t.Cleanup kills the child's process
-// group if it is still running.
+// 10-second limit on each waitFor and wait is only a safety net. t.Cleanup
+// kills the child's process group if it is still running.
 func startKakusu(t *testing.T, home string, extraEnv []string, args ...string) *bgKakusu {
 	t.Helper()
 	r, w, err := os.Pipe()
@@ -182,9 +181,8 @@ func startKakusu(t *testing.T, home string, extraEnv []string, args ...string) *
 		args: args,
 		cmd:  kakusuCmd(home, extraEnv, args),
 		// Buffered, so that send never waits for the child to prompt.
-		lines:    make(chan string, 16),
-		done:     make(chan struct{}),
-		deadline: time.Now().Add(10 * time.Second),
+		lines: make(chan string, 16),
+		done:  make(chan struct{}),
 	}
 	p.cmd.Stdin = r
 	p.cmd.Stdout = &p.stdout
@@ -244,13 +242,14 @@ func (p *bgKakusu) send(lines ...string) {
 // waitFor waits until stderr matches re or the child exits.
 func (p *bgKakusu) waitFor(re *regexp.Regexp) {
 	p.t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
 	for !re.MatchString(p.stderr.String()) {
 		select {
 		case <-p.done:
 			return
 		case <-time.After(10 * time.Millisecond):
 		}
-		if time.Now().After(p.deadline) {
+		if time.Now().After(deadline) {
 			p.t.Fatalf("kakusu %v: stderr did not match %q; stderr: %q", p.args, re, p.stderr.String())
 		}
 	}
@@ -262,7 +261,7 @@ func (p *bgKakusu) wait() result {
 	close(p.lines)
 	select {
 	case <-p.done:
-	case <-time.After(time.Until(p.deadline)):
+	case <-time.After(10 * time.Second):
 		p.t.Fatalf("kakusu %v did not exit; stderr: %q", p.args, p.stderr.String())
 	}
 	return result{code: p.cmd.ProcessState.ExitCode(), stdout: p.stdout.String(), stderr: p.stderr.String()}
