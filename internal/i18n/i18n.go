@@ -26,6 +26,7 @@ const (
 	MsgErrAgentConnFailed    = "err.agent_conn_failed"
 	MsgErrUnknownCommand     = "err.unknown_command"
 	MsgErrVaultNotFound      = "err.vault_not_found"
+	MsgErrVaultChanged       = "err.vault_changed"
 
 	// Usage
 	MsgUsageSet    = "usage.set"

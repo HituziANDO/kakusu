@@ -3,11 +3,13 @@ package vault
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/HituziANDO/kakusu/internal/agent"
@@ -24,6 +26,32 @@ type State struct {
 	Data Data
 	Key  []byte
 	Salt []byte
+	// Loaded is the vault file as the command read it. Save writes nothing if
+	// the file no longer matches it.
+	Loaded Snapshot
+}
+
+// Snapshot identifies the content of the vault file. The zero Snapshot means
+// that there was no file.
+type Snapshot struct {
+	Exists bool
+	sum    [sha256.Size]byte
+}
+
+// ReadSnapshot reads the vault file and returns its Snapshot.
+func ReadSnapshot() (Snapshot, error) {
+	raw, err := os.ReadFile(config.KakusuFile())
+	if os.IsNotExist(err) {
+		return Snapshot{}, nil
+	}
+	if err != nil {
+		return Snapshot{}, err
+	}
+	return snapshotOf(raw), nil
+}
+
+func snapshotOf(raw []byte) Snapshot {
+	return Snapshot{Exists: true, sum: sha256.Sum256(raw)}
 }
 
 // LoadKakusu loads (or creates) the vault.
@@ -57,9 +85,10 @@ func LoadKakusu(password string, allowCreate, useCache bool, promptPw func(strin
 			}
 		}
 		return &State{
-			Data: make(Data),
-			Key:  key,
-			Salt: salt,
+			Data:   make(Data),
+			Key:    key,
+			Salt:   salt,
+			Loaded: Snapshot{},
 		}, nil
 	}
 
@@ -68,6 +97,7 @@ func LoadKakusu(password string, allowCreate, useCache bool, promptPw func(strin
 	if err != nil {
 		return nil, err
 	}
+	loaded := snapshotOf(raw)
 	if len(raw) < crypto.SaltSize {
 		return nil, errors.New(i18n.Msg(i18n.MsgErrFileCorrupted))
 	}
@@ -86,7 +116,7 @@ func LoadKakusu(password string, allowCreate, useCache bool, promptPw func(strin
 						if err := json.Unmarshal(plaintext, &data); err != nil {
 							return nil, fmt.Errorf(i18n.Msg(i18n.MsgErrJSONParse), err)
 						}
-						return &State{Data: data, Key: aKey, Salt: salt}, nil
+						return &State{Data: data, Key: aKey, Salt: salt, Loaded: loaded}, nil
 					}
 				}
 				agent.ClearKey()
@@ -122,10 +152,13 @@ func LoadKakusu(password string, allowCreate, useCache bool, promptPw func(strin
 		agent.SetKey(key, salt)
 	}
 
-	return &State{Data: data, Key: key, Salt: salt}, nil
+	return &State{Data: data, Key: key, Salt: salt, Loaded: loaded}, nil
 }
 
-// Save writes the vault atomically to disk.
+// Save writes the vault atomically to disk. If the vault file no longer matches
+// s.Loaded, it writes nothing and returns an error. Write commands hold a lock
+// while they run (lockVault in internal/cli/commands.go), but a sync service,
+// for example, does not take it.
 func (s *State) Save() error {
 	dir := config.KakusuDir()
 	if err := os.MkdirAll(dir, 0700); err != nil {
@@ -139,8 +172,17 @@ func (s *State) Save() error {
 	if err != nil {
 		return err
 	}
-	content := append(s.Salt, blob...)
+	// A new slice: s.Salt can share its array with the bytes LoadKakusu read.
+	content := slices.Concat(s.Salt, blob)
 	path := config.KakusuFile()
+
+	current, err := ReadSnapshot()
+	if err != nil {
+		return err
+	}
+	if current != s.Loaded {
+		return errors.New(i18n.Msg(i18n.MsgErrVaultChanged))
+	}
 
 	tmpFile, err := os.CreateTemp(dir, ".secrets.enc.tmp.*")
 	if err != nil {

@@ -19,6 +19,7 @@ var catalogJA = messages{
 	MsgErrAgentConnFailed:    "エージェントに接続できません",
 	MsgErrUnknownCommand:     "不明なコマンド '%s'",
 	MsgErrVaultNotFound:      "Kakusu が見つかりません。先に 'kakusu init' を実行してください",
+	MsgErrVaultChanged:       "読み込んだ後に Kakusu のファイルが変更されました（同期サービスや別のデバイスなど）。何も保存していません。もう一度コマンドを実行してください",
 
 	// 使い方
 	MsgUsageSet:    "使い方: kakusu set <group/key> [value]",

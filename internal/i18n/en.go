@@ -19,6 +19,7 @@ var catalogEN = messages{
 	MsgErrAgentConnFailed:    "cannot connect to agent",
 	MsgErrUnknownCommand:     "unknown command '%s'",
 	MsgErrVaultNotFound:      "vault not found. run 'kakusu init' first",
+	MsgErrVaultChanged:       "the vault file changed after it was loaded (for example, by a sync service or on another device). nothing was saved. run the command again",
 
 	// Usage
 	MsgUsageSet:    "usage: kakusu set <group/key> [value]",

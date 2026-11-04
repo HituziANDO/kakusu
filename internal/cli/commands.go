@@ -122,7 +122,11 @@ var initCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		lockVault()
 		path := config.KakusuFile()
-		if _, err := os.Stat(path); err == nil {
+		loaded, err := vault.ReadSnapshot()
+		if err != nil {
+			ui.Die(err.Error())
+		}
+		if loaded.Exists {
 			if !ui.Confirm(i18n.Msg(i18n.MsgPromptOverwrite)) {
 				fmt.Fprintln(os.Stderr, i18n.Msg(i18n.MsgCancelled))
 				return
@@ -137,7 +141,7 @@ var initCmd = &cobra.Command{
 			ui.Die(err.Error())
 		}
 		key := crypto.DeriveKey(pw, salt)
-		s := &vault.State{Data: make(vault.Data), Key: key, Salt: salt}
+		s := &vault.State{Data: make(vault.Data), Key: key, Salt: salt, Loaded: loaded}
 		if err := s.Save(); err != nil {
 			ui.Die(err.Error())
 		}
