@@ -29,15 +29,25 @@ var catalogEN = messages{
 	MsgUsageAgent:  "usage: kakusu agent <stop|status>",
 	MsgUsageHint:   "  run 'kakusu help' for a list of commands",
 
-	// Prompts
-	MsgPromptMasterPassword: "Master password: ",
-	MsgPromptNewPassword:    "New master password: ",
-	MsgPromptConfirm:        "Confirm: ",
-	MsgPromptMinLength:      "must be at least 8 characters",
-	MsgPromptMismatch:       "passwords do not match. please try again.",
-	MsgPromptOverwrite:      "Existing vault found. Overwrite? [y/N]: ",
-	MsgPromptSecretValue:    "%s/%s value: ",
-	MsgPromptDeleteConfirm:  "Delete kks://%s/%s? [y/N]: ",
+	// Prompts. The password prompts take their targets as %q, so that control
+	// characters in a name or path are shown escaped rather than sent to the
+	// terminal.
+	MsgPromptPasswordToPrint:      "To print the value of %q, enter the master password: ",
+	MsgPromptPasswordToPrintGroup: "To print every value in group %q, enter the master password: ",
+	MsgPromptPasswordToPrintEnv:   "To print the values that %q refers to, enter the master password: ",
+	MsgPromptPasswordToList:       "To list keys, enter the master password: ",
+	MsgPromptPasswordToStore:      "To store %q, enter the master password: ",
+	MsgPromptPasswordToDelete:     "To delete %q, enter the master password: ",
+	// The first argument is the command line with each element already quoted.
+	MsgPromptPasswordToRun:   "To run %s with the values that %q refers to, enter the master password: ",
+	MsgPromptCurrentPassword: "Current master password: ",
+	MsgPromptNewPassword:     "New master password: ",
+	MsgPromptConfirm:         "Confirm: ",
+	MsgPromptMinLength:       "must be at least 8 characters",
+	MsgPromptMismatch:        "passwords do not match. please try again.",
+	MsgPromptOverwrite:       "Existing vault found. Overwrite? [y/N]: ",
+	MsgPromptSecretValue:     "%s/%s value: ",
+	MsgPromptDeleteConfirm:   "Delete kks://%s/%s? [y/N]: ",
 
 	// Status
 	MsgCancelled:       "cancelled",
