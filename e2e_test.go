@@ -89,8 +89,8 @@ func kakusuCmd(home string, extraEnv, args []string) *exec.Cmd {
 
 // kakusu runs the binary under home with extraEnv added. With no input, stdin
 // is /dev/null. Otherwise each line is written only after the child prints one
-// more password prompt: ui.PromptPassword creates a new bufio.Reader per call,
-// so lines written together would be swallowed by the first prompt.
+// more prompt: ui.PromptPassword and ui.Confirm create a new bufio.Reader per
+// call, so lines written together would be swallowed by the first prompt.
 func kakusu(t *testing.T, home string, extraEnv, input []string, args ...string) result {
 	t.Helper()
 	cmd := kakusuCmd(home, extraEnv, args)
@@ -197,7 +197,7 @@ func startKakusu(t *testing.T, home string, extraEnv []string, args ...string) *
 		p.cmd.Wait()
 		close(p.done)
 	}()
-	// Write each sent line only after one more password prompt, as kakusu does.
+	// Write each sent line only after one more prompt, as kakusu does.
 	go func() {
 		defer w.Close()
 		for i := 0; ; i++ {
@@ -231,8 +231,7 @@ func startKakusu(t *testing.T, home string, extraEnv []string, args ...string) *
 	return p
 }
 
-// send queues lines that answer the child's next password prompts, one line per
-// prompt.
+// send queues lines that answer the child's next prompts, one line per prompt.
 func (p *bgKakusu) send(lines ...string) {
 	for _, line := range lines {
 		p.lines <- line
