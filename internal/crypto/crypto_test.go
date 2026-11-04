@@ -27,10 +27,11 @@ func TestDeriveKeyGolden(t *testing.T) {
 	}
 }
 
-// testdata/secrets-v0.5.0.enc was written by kakusu v0.5.0 with
-// `init` (password "golden-fixture-pw"), `set app/db_password dummy-db-pass`
-// and `set token dummy-token`. v0.4.1 writes the same format:
-// salt ‖ nonce ‖ AES-256-GCM ciphertext and tag.
+// testdata/secrets-v0.5.0.enc was written by a kakusu binary built from
+// `git archive v0.5.0`, run with a temporary HOME and KAKUSU_NO_AGENT=1:
+// `init` with the password "golden-fixture-pw", then
+// `set app/db_password dummy-db-pass` and `set token dummy-token`.
+// v0.4.1 writes the same format: salt ‖ nonce ‖ AES-256-GCM ciphertext and tag.
 func TestDecryptReleasedVault(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("testdata", "secrets-v0.5.0.enc"))
 	if err != nil {
