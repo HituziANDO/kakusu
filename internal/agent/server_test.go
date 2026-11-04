@@ -166,7 +166,7 @@ func TestKeyExpiresMaxKeyAgeAfterSetKeyOnWallClock(t *testing.T) {
 	if mustGetKey(t) == nil {
 		t.Fatal("GET_KEY 1m before maxKeyAge: NO_KEY; want the key")
 	}
-	// That GET_KEY extended the TTL to 8h, but only 1m remains until maxKeyAge.
+	// The deadline counts from SET_KEY, and that GET_KEY did not move it.
 	if resp := mustQueryStatus(t); !resp.HasKey || resp.RemainingSeconds != 60 {
 		t.Errorf("STATUS 1m before maxKeyAge: HasKey %v, RemainingSeconds %d; want true, 60", resp.HasKey, resp.RemainingSeconds)
 	}
