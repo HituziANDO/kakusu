@@ -184,7 +184,7 @@ While concealing, `kakusu run` runs the command as a child in the same process g
 - `kakusu run` exits after the command exits and its output ends. A background process that the command starts and that keeps the output open keeps `kakusu run` running until a signal, such as Ctrl-C, ends it.
 - The command writes to a pipe even when the output of `kakusu run` is a file, so a command that seeks in its output fails with "Illegal seek". Use `--no-masking`, or let the command write the file itself.
 - On Unix, `kakusu run` passes on the signals it receives, so a signal sent to the whole process group (`kill -TERM -<PGID>`) reaches the command twice. SIGINT or SIGQUIT sent to `kakusu run` alone while it is in the terminal's foreground is not passed on, because the terminal sends them to the command too.
-- If the command succeeds but its output cannot be written, `kakusu run` exits with status 141, as a shell reports a death by SIGPIPE, when the reader has gone on Unix, and with status 1 and the error otherwise. A command that fails decides the exit status itself.
+- If the output cannot be written because the reader has gone (on Unix), `kakusu run` exits with the command's status, or with status 141, as a shell reports a death by SIGPIPE, if the command succeeded. If it cannot be written for another reason, such as a full disk, `kakusu run` prints the error and exits with status 1, whatever the command did.
 
 With `--no-masking`, the command runs as if run directly, with the same signals and output.
 

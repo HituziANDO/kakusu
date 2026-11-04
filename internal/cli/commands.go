@@ -378,17 +378,22 @@ var runCmd = &cobra.Command{
 		if c.ProcessState == nil {
 			ui.Die(err.Error())
 		}
-		// A command that failed decides the exit status. Otherwise output
-		// that could not be written makes run fail: with exit status
-		// 128+SIGPIPE, as a shell reports a death by SIGPIPE, if the reader
-		// has gone, and with the error otherwise.
+		// Output that could not be written for a reason other than a reader
+		// that has gone makes run fail with that error, whatever the command
+		// did: once its pipe is closed, the command's next write fails by
+		// SIGPIPE, which would hide the cause. Otherwise a command that
+		// failed decides the exit status, and a command that succeeded but
+		// lost its reader makes run exit 128+SIGPIPE, as a shell reports a
+		// death by SIGPIPE.
+		for _, r := range relays {
+			if r.err != nil && !errors.Is(r.err, syscall.EPIPE) {
+				ui.Die(r.err.Error())
+			}
+		}
 		if c.ProcessState.Success() {
 			for _, r := range relays {
 				if errors.Is(r.err, syscall.EPIPE) {
 					os.Exit(128 + int(syscall.SIGPIPE))
-				}
-				if r.err != nil {
-					ui.Die(r.err.Error())
 				}
 			}
 		}
@@ -430,8 +435,8 @@ func newRelay(out io.Writer, secrets []string) (*relay, error) {
 
 // copy copies until every process holding w has closed it, and then writes
 // the bytes that the conceal.Writer holds. If writing to out fails, it stops
-// and closes r, so that the command's next write fails as it would if the
-// command wrote to out itself.
+// and closes r, so that the command's next write fails by EPIPE or SIGPIPE,
+// whatever error writing to out returned.
 func (r *relay) copy() {
 	_, r.err = io.Copy(r.cw, r.r)
 	if r.err == nil {

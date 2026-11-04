@@ -571,37 +571,51 @@ func TestRunFailsWhenOutputIsLost(t *testing.T) {
 		t.Cleanup(func() { f.Close() })
 		return f
 	}
-
-	t.Run("read_only_stdout", func(t *testing.T) {
-		// As with 1</dev/null, writing to stdout fails with EBADF.
-		r := run(t, readOnly(t), `echo "$X"`)
-		if r.code != 1 || !strings.Contains(r.stderr, "bad file descriptor") {
-			t.Errorf("exit %d, stderr %q; want exit 1 and the write error", r.code, r.stderr)
-		}
-	})
-	t.Run("held_bytes_lost", func(t *testing.T) {
-		// The output is the start of the value, which kakusu holds until the
-		// output ends and then fails to write.
-		r := run(t, readOnly(t), `printf %s "${X%?}"`)
-		if r.code != 1 || !strings.Contains(r.stderr, "bad file descriptor") {
-			t.Errorf("exit %d, stderr %q; want exit 1 and the write error", r.code, r.stderr)
-		}
-	})
-	t.Run("failing_command_wins", func(t *testing.T) {
-		if r := run(t, readOnly(t), `echo "$X"; exit 7`); r.code != 7 {
-			t.Errorf("exit %d, stderr %q; want 7 from the command", r.code, r.stderr)
-		}
-	})
-	t.Run("reader_gone", func(t *testing.T) {
+	// readerGone returns the write end of a pipe whose read end is closed.
+	readerGone := func(t *testing.T) *os.File {
+		t.Helper()
 		r, w, err := os.Pipe()
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer w.Close()
 		r.Close()
+		t.Cleanup(func() { w.Close() })
+		return w
+	}
+	wantWriteError := func(t *testing.T, r result) {
+		t.Helper()
+		if r.code != 1 || !strings.Contains(r.stderr, "bad file descriptor") {
+			t.Errorf("exit %d, stderr %q; want exit 1 and the write error", r.code, r.stderr)
+		}
+	}
+
+	t.Run("read_only_stdout", func(t *testing.T) {
+		// As with 1</dev/null, writing to stdout fails with EBADF.
+		wantWriteError(t, run(t, readOnly(t), `echo "$X"`))
+	})
+	t.Run("held_bytes_lost", func(t *testing.T) {
+		// The output is the start of the value, which kakusu holds until the
+		// output ends and then fails to write.
+		wantWriteError(t, run(t, readOnly(t), `printf %s "${X%?}"`))
+	})
+	t.Run("write_after_write_error", func(t *testing.T) {
+		// kakusu closes the command's pipe after the write error, so the
+		// command's next write kills it by SIGPIPE. The write error still
+		// decides.
+		wantWriteError(t, run(t, readOnly(t), `echo "$X"; sleep 0.3; echo more`))
+	})
+	t.Run("write_error_wins_over_failing_command", func(t *testing.T) {
+		wantWriteError(t, run(t, readOnly(t), `echo "$X"; exit 7`))
+	})
+	t.Run("failing_command_wins_over_reader_gone", func(t *testing.T) {
+		if r := run(t, readerGone(t), `echo "$X"; exit 7`); r.code != 7 {
+			t.Errorf("exit %d, stderr %q; want 7 from the command", r.code, r.stderr)
+		}
+	})
+	t.Run("reader_gone", func(t *testing.T) {
 		// The command's one write reaches kakusu's pipe, and kakusu's write
 		// fails with EPIPE.
-		res := run(t, w, `echo "$X"`)
+		res := run(t, readerGone(t), `echo "$X"`)
 		if res.status.Signaled() || res.code != 128+int(syscall.SIGPIPE) {
 			t.Errorf("exit %d, signaled %v by %v; want exit %d", res.code, res.status.Signaled(), res.status.Signal(), 128+int(syscall.SIGPIPE))
 		}
