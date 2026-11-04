@@ -2,6 +2,7 @@ package cli
 
 import (
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -367,6 +368,20 @@ var runCmd = &cobra.Command{
 		if c.ProcessState == nil {
 			ui.Die(err.Error())
 		}
+		// A command that failed decides the exit status. Otherwise output
+		// that could not be written makes run fail: with exit status
+		// 128+SIGPIPE, as a shell reports a death by SIGPIPE, if the reader
+		// has gone, and with the error otherwise.
+		if c.ProcessState.Success() {
+			for _, r := range relays {
+				if errors.Is(r.err, syscall.EPIPE) {
+					os.Exit(128 + int(syscall.SIGPIPE))
+				}
+				if r.err != nil {
+					ui.Die(r.err.Error())
+				}
+			}
+		}
 		platform.ExitWithStatus(c.ProcessState)
 	},
 }
@@ -392,6 +407,7 @@ const (
 type relay struct {
 	r, w *os.File
 	cw   *conceal.Writer
+	err  error // why copy stopped before the end of the output, or nil
 }
 
 func newRelay(out io.Writer, secrets []string) (*relay, error) {
@@ -407,8 +423,9 @@ func newRelay(out io.Writer, secrets []string) (*relay, error) {
 // and closes r, so that the command's next write fails as it would if the
 // command wrote to out itself.
 func (r *relay) copy() {
-	if _, err := io.Copy(r.cw, r.r); err == nil {
-		r.cw.Flush()
+	_, r.err = io.Copy(r.cw, r.r)
+	if r.err == nil {
+		r.err = r.cw.Flush()
 	}
 	r.r.Close()
 }

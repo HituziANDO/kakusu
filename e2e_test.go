@@ -505,7 +505,7 @@ func TestRunWaitsForCommandAfterReaderExits(t *testing.T) {
 	// kakusu gets EPIPE for "two" and closes the command's pipe, so "three"
 	// kills the command by SIGPIPE, as it would without kakusu in between.
 	if _, err := os.Stat(filepath.Join(home, "m1")); err != nil {
-		t.Errorf("kakusu exited before the command; stderr %q", res.stderr)
+		t.Errorf("the command had not reached m1 when kakusu exited; stderr %q", res.stderr)
 	}
 	if _, err := os.Stat(filepath.Join(home, "m2")); err == nil {
 		t.Error("the command wrote after the reader exited without failing")
@@ -513,6 +513,53 @@ func TestRunWaitsForCommandAfterReaderExits(t *testing.T) {
 	if res.status.Signaled() || res.code != 128+int(syscall.SIGPIPE) {
 		t.Errorf("kakusu exit %d, signaled %v by %v; want exit %d", res.code, res.status.Signaled(), res.status.Signal(), 128+int(syscall.SIGPIPE))
 	}
+}
+
+func TestRunFailsWhenOutputIsLost(t *testing.T) {
+	home := newVault(t)
+	envFile := writeEnvFile(t, home)
+	run := func(t *testing.T, stdout *os.File, script string) result {
+		t.Helper()
+		p := startWithStdout(t, home, nil, nil, stdout, kakusuBin, "run", "--env", envFile, "--", "sh", "-c", script)
+		t.Cleanup(p.kill)
+		return p.wait(t)
+	}
+	readOnly := func(t *testing.T) *os.File {
+		t.Helper()
+		f, err := os.Open(os.DevNull)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { f.Close() })
+		return f
+	}
+
+	t.Run("read_only_stdout", func(t *testing.T) {
+		// As with 1</dev/null, writing to stdout fails with EBADF.
+		r := run(t, readOnly(t), `echo "$X"`)
+		if r.code != 1 || !strings.Contains(r.stderr, "bad file descriptor") {
+			t.Errorf("exit %d, stderr %q; want exit 1 and the write error", r.code, r.stderr)
+		}
+	})
+	t.Run("failing_command_wins", func(t *testing.T) {
+		if r := run(t, readOnly(t), `echo "$X"; exit 7`); r.code != 7 {
+			t.Errorf("exit %d, stderr %q; want 7 from the command", r.code, r.stderr)
+		}
+	})
+	t.Run("reader_gone", func(t *testing.T) {
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer w.Close()
+		r.Close()
+		// The command's one write reaches kakusu's pipe, and kakusu's write
+		// fails with EPIPE.
+		res := run(t, w, `echo "$X"`)
+		if res.status.Signaled() || res.code != 128+int(syscall.SIGPIPE) {
+			t.Errorf("exit %d, signaled %v by %v; want exit %d", res.code, res.status.Signaled(), res.status.Signal(), 128+int(syscall.SIGPIPE))
+		}
+	})
 }
 
 func TestRunKeepsIgnoredSignalsIgnored(t *testing.T) {
