@@ -324,6 +324,7 @@ func TestExportEnvRejectsInvalidNames(t *testing.T) {
 		"-f",
 		"export FOO", // the line "export FOO=v"
 		"db-password",
+		"1A",
 	}
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
