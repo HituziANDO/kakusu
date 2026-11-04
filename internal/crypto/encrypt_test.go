@@ -55,6 +55,11 @@ func TestDecryptFailsOnAnyFlippedByte(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Without this check, an EncryptData that writes undecryptable blobs
+	// would pass the loop below.
+	if _, err := DecryptData(blob, key); err != nil {
+		t.Fatalf("DecryptData of the untampered blob: %v", err)
+	}
 	tagStart := len(blob) - gcmTagSize
 	for i := range blob {
 		part := "ciphertext"
@@ -73,9 +78,13 @@ func TestDecryptFailsOnAnyFlippedByte(t *testing.T) {
 }
 
 func TestDecryptFailsWithWrongKey(t *testing.T) {
-	blob, err := EncryptData([]byte("dummy-secret"), randomKey())
+	key := randomKey()
+	blob, err := EncryptData([]byte("dummy-secret"), key)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, err := DecryptData(blob, key); err != nil {
+		t.Fatalf("DecryptData with the right key: %v", err)
 	}
 	if _, err := DecryptData(blob, randomKey()); err == nil {
 		t.Error("DecryptData succeeded with the wrong key")
