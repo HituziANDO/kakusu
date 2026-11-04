@@ -29,9 +29,9 @@ var catalogEN = messages{
 	MsgUsageAgent:  "usage: kakusu agent <stop|status>",
 	MsgUsageHint:   "  run 'kakusu help' for a list of commands",
 
-	// Prompts. The password prompts take their targets as %q, so that control
-	// characters in a name or path are shown escaped rather than sent to the
-	// terminal.
+	// Prompts. The ones read by ui.PromptPassword take their targets as %q, so
+	// that control characters in a name or path are shown escaped rather than
+	// sent to the terminal.
 	MsgPromptPasswordToPrint:      "To print the value of %q, enter the master password: ",
 	MsgPromptPasswordToPrintGroup: "To print every value in group %q, enter the master password: ",
 	MsgPromptPasswordToPrintEnv:   "To print the values that %q refers to, enter the master password: ",
@@ -46,7 +46,7 @@ var catalogEN = messages{
 	MsgPromptMinLength:       "must be at least 8 characters",
 	MsgPromptMismatch:        "passwords do not match. please try again.",
 	MsgPromptOverwrite:       "Existing vault found. Overwrite? [y/N]: ",
-	MsgPromptSecretValue:     "%s/%s value: ",
+	MsgPromptSecretValue:     "%q value: ",
 	MsgPromptDeleteConfirm:   "Delete kks://%s/%s? [y/N]: ",
 
 	// Status

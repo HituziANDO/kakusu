@@ -291,6 +291,10 @@ func TestPasswordPromptEscapesTarget(t *testing.T) {
 			`To print the values that "` + realHome + `/x\n\x1b[31m.env" refers to, enter the master password: `},
 		{"get", []string{"get", "evil\x1b[2J/k\ney"},
 			`To print the value of "evil\x1b[2J/k\ney", enter the master password: `},
+		// A raw target here would erase the line and paint a fake master
+		// password prompt in front of the hidden value input.
+		{"set_value", []string{"set", "g/k\r\x1b[2KTo list keys, enter the master password: \x1b]0;"},
+			`"g/k\r\x1b[2KTo list keys, enter the master password: \x1b]0;" value: `},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := kakusu(t, home, nil, nil, tc.args...)

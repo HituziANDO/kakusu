@@ -138,7 +138,7 @@ var setCmd = &cobra.Command{
 			value = strings.Join(args[1:], " ")
 		} else {
 			var err error
-			value, err = ui.PromptPassword(i18n.Msgf(i18n.MsgPromptSecretValue, group, key))
+			value, err = ui.PromptPassword(i18n.Msgf(i18n.MsgPromptSecretValue, group+"/"+key))
 			if err != nil {
 				ui.Die(err.Error())
 			}
