@@ -18,6 +18,10 @@ const (
 )
 
 // DeriveKey derives an AES-256 key using PBKDF2-HMAC-SHA256 (RFC 2898).
+// It returns an error only if crypto/pbkdf2 rejects the parameters. With
+// KeySize, SHA-256 and a salt of SaltSize bytes it does not, even in FIPS
+// 140-3 only mode, which rejects keys under 112 bits, salts under 128 bits
+// and hashes other than SHA-2 and SHA-3.
 func DeriveKey(password string, salt []byte) ([]byte, error) {
 	return pbkdf2.Key(sha256.New, password, salt, Pbkdf2Iterations, KeySize)
 }
