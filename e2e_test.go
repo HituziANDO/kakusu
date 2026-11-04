@@ -705,3 +705,19 @@ func TestInitOverwritesUnreadableVault(t *testing.T) {
 	}
 	mustSucceed(t, kakusu(t, home, noAgent, []string{"NEWPASS12"}, "list"))
 }
+
+func TestDeleteAndPasswdWithoutVaultCreateNothing(t *testing.T) {
+	for _, args := range [][]string{{"delete", "a/b"}, {"passwd"}} {
+		t.Run(args[0], func(t *testing.T) {
+			home := newHome(t)
+			env := append([]string{"KAKUSU_FILE=" + filepath.Join(home, "nope", "sub", "secrets.enc")}, noAgent...)
+			r := kakusu(t, home, env, nil, args...)
+			if r.code != 1 || !strings.Contains(r.stderr, "vault not found") {
+				t.Errorf("exit %d, stderr %q; want exit 1 and the vault-not-found error", r.code, r.stderr)
+			}
+			if _, err := os.Stat(filepath.Join(home, "nope")); !os.IsNotExist(err) {
+				t.Errorf("stat of the vault's parent directory: %v; want it absent", err)
+			}
+		})
+	}
+}

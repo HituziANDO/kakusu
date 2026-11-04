@@ -89,12 +89,19 @@ var vaultLock *os.File
 // itself is not locked, because Save replaces it with a new file. The lock file
 // is never deleted: a process could then lock a new file while another still
 // held the old one. Call it once, before the command reads the vault.
-func lockVault() {
+// With allowCreate false, it creates no directory, and a missing one means
+// that there is no vault.
+func lockVault(allowCreate bool) {
 	path := config.KakusuFile() + ".lock"
-	if err := os.MkdirAll(config.KakusuDir(), 0700); err != nil {
-		ui.Die(err.Error())
+	if allowCreate {
+		if err := os.MkdirAll(config.KakusuDir(), 0700); err != nil {
+			ui.Die(err.Error())
+		}
 	}
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0600)
+	if !allowCreate && os.IsNotExist(err) {
+		ui.Die(i18n.Msg(i18n.MsgErrVaultNotFound))
+	}
 	if err != nil {
 		ui.Die(err.Error())
 	}
@@ -123,7 +130,7 @@ var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize vault (set master password)",
 	Run: func(cmd *cobra.Command, args []string) {
-		lockVault()
+		lockVault(true)
 		path := config.KakusuFile()
 		loaded, err := vault.ReadSnapshot()
 		if err != nil {
@@ -181,7 +188,7 @@ var setCmd = &cobra.Command{
 			}
 		}
 
-		lockVault()
+		lockVault(true)
 		s := loadVault(true)
 		vault.SetSecret(s.Data, group, key, value)
 		if err := s.Save(); err != nil {
@@ -296,7 +303,7 @@ var deleteCmd = &cobra.Command{
 			ui.Die(i18n.Msg(i18n.MsgUsageDelete))
 		}
 		group, key := vault.ParseRef(args[0])
-		lockVault()
+		lockVault(false)
 		s := loadVault(false)
 		if _, ok := vault.GetSecret(s.Data, group, key); !ok {
 			ui.Die(i18n.Msgf(i18n.MsgErrSecretNotFound, group, key))
@@ -439,7 +446,7 @@ var passwdCmd = &cobra.Command{
 	Use:   "passwd",
 	Short: "Change master password",
 	Run: func(cmd *cobra.Command, args []string) {
-		lockVault()
+		lockVault(false)
 		s := loadVaultAskingPassword()
 		newPw, err := ui.PromptNewPassword()
 		if err != nil {
