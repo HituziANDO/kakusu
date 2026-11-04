@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -541,5 +542,75 @@ func TestSetSavesNothingWhenVaultChangedAfterLoad(t *testing.T) {
 				t.Errorf("vault read error %v, equal %v; want the bytes written during set kept", err, bytes.Equal(got, other))
 			}
 		})
+	}
+}
+
+func TestKilledSetLeavesNoStaleLock(t *testing.T) {
+	home := newNoAgentVault(t)
+	a := startKakusu(t, home, noAgent, "set", "race/a", "1")
+	a.waitFor(masterPromptRe)
+	a.kill()
+
+	r := mustSucceed(t, kakusu(t, home, noAgent, []string{testPassword}, "set", "race/b", "2"))
+	if waitingRe.MatchString(r.stderr) {
+		t.Errorf("stderr %q; want no waiting line", r.stderr)
+	}
+}
+
+func TestListDoesNotWaitForLock(t *testing.T) {
+	home := newNoAgentVault(t)
+	a := startKakusu(t, home, noAgent, "set", "race/a", "1")
+	a.waitFor(masterPromptRe)
+
+	r := mustSucceed(t, kakusu(t, home, noAgent, []string{testPassword}, "list"))
+	if waitingRe.MatchString(r.stderr) {
+		t.Errorf("stderr %q; want no waiting line", r.stderr)
+	}
+	a.send(testPassword)
+	mustSucceed(t, a.wait())
+}
+
+func TestConcurrentSetsCreatingVaultKeepBothValues(t *testing.T) {
+	home := newHome(t)
+	a := startKakusu(t, home, noAgent, "set", "race/a", "1")
+	a.waitFor(regexp.MustCompile(`New master password: `))
+	b := startKakusu(t, home, noAgent, "set", "race/b", "2")
+	b.waitFor(waitingRe)
+	a.send(testPassword, testPassword)
+	mustSucceed(t, a.wait())
+	// b loads the vault that a created, so it asks for that vault's password.
+	b.waitFor(masterPromptRe)
+	b.send(testPassword)
+	rb := mustSucceed(t, b.wait())
+	if strings.Contains(rb.stderr, "New master password: ") {
+		t.Errorf("b stderr %q; want no new password prompt", rb.stderr)
+	}
+
+	r := mustSucceed(t, kakusu(t, home, noAgent, []string{testPassword}, "list", "race"))
+	if want := "\n[race]\n  a  ***\n  b  ***\n\n"; r.stdout != want {
+		t.Errorf("list stdout %q; want %q", r.stdout, want)
+	}
+}
+
+func TestSetWarnsAndSavesWhenLockIsUnsupported(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("needs flock to fail with ENOTSUP on a FIFO, as it does on macOS")
+	}
+	home := newNoAgentVault(t)
+	// flock on a FIFO fails with the error a filesystem without locks returns.
+	lockPath := filepath.Join(home, ".kakusu", "secrets.enc.lock")
+	if err := os.Remove(lockPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(lockPath, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	r := mustSucceed(t, kakusu(t, home, noAgent, []string{testPassword}, "set", "race/a", "1"))
+	if want := "warning: cannot lock " + lockPath + " "; !strings.Contains(r.stderr, want) {
+		t.Errorf("stderr %q; want %q", r.stderr, want)
+	}
+	if r := mustSucceed(t, kakusu(t, home, noAgent, []string{testPassword}, "get", "race/a")); r.stdout != "1\n" {
+		t.Errorf("get stdout %q; want %q", r.stdout, "1\n")
 	}
 }
