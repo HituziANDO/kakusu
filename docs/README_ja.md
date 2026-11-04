@@ -142,6 +142,8 @@ kakusu run --env .env.staging -- python app.py
 eval "$(kakusu export)"
 ```
 
+`kakusu export` が受け付ける名前は、POSIX シェルの変数名の規則（`[A-Za-z_][A-Za-z0-9_]*`）に合うものだけです。`.env` ファイルの名前、または `kakusu export <group>`・`kakusu export <group/key>` が出力するキーに規則に合わないものが1つでもあると、何も出力せず、その名前を挙げたエラーで終了します。`export FOO=bar` と書いた行も、名前が `export FOO` になるためエラーになります。`FOO=bar` と書いてください。export が保証するのは `.env` ファイルが出力する文の構造を変えられないことだけで、`PS1`・`PROMPT_COMMAND`・`PATH` のような規則に合う名前でも後でシェルにコードを実行させられるため、他人から受け取った `.env` ファイルは、その export を `eval` する前に中身を確認してください。
+
 ## `run` と `export` の違い
 
 |      | `kakusu run`          | `kakusu export`                 |
