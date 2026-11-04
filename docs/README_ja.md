@@ -16,7 +16,7 @@
 - **エージェント**によるマスターパスワードキャッシュ（ssh-agent パターン）
 - 外部サービス不要、すべてローカルで完結
 - **多言語対応**: 英語（デフォルト）/ 日本語を環境変数で切り替え可能
-- 依存ライブラリ最小限（`cobra` + `golang.org/x/term`）
+- 依存ライブラリ最小限（`cobra` + `golang.org/x/term` + `golang.org/x/sys`）
 
 ## 対応プラットフォーム
 
@@ -98,7 +98,8 @@ kakusu run -- python app.py
 
 | コマンド                               | 説明                              |
 | ---------------------------------- | ------------------------------- |
-| `kakusu run [--env FILE] -- <cmd>` | `.env` の `kks://` 参照を解決してコマンド実行 |
+| `kakusu run [--env FILE] -- <cmd>` | `.env` の `kks://` 参照を解決してコマンド実行（端末でない出力では値を隠す） |
+| `kakusu run --no-masking -- <cmd>` | 出力中の値を隠さずにコマンド実行 |
 | `kakusu export [--env FILE]`       | eval 用に export 文を出力（POSIX シェル向け）|
 | `kakusu export <group>`            | グループ内の全シークレットを export |
 | `kakusu export <group/key>`        | 特定のシークレットを export |
@@ -129,7 +130,7 @@ DB_PASSWORD=kks://myproject/db_password
 OPENAI_API_KEY=kks://shared/openai_key
 ```
 
-`kakusu run` または `kakusu export` を使うと、`kks://group/key` が実際の値に置換されます。
+`kakusu run` または `kakusu export` を使うと、`kks://group/key` が実際の値に置換されます。`kakusu run` では、`.env` ファイルで設定した変数が、同じ名前の継承した環境変数を置き換えます。
 
 ```bash
 # 直接実行
@@ -162,6 +163,31 @@ eval "$(kakusu export --env .env.staging)"
 eval "$(kakusu export myproject)"
 ```
 
+## `run` の出力での値の隠蔽
+
+stdout または stderr が端末でないとき（AI ツールや CI がコマンドを実行するときのようにパイプやファイルのとき）、`kakusu run` はその出力にそのまま現れる `kks://` 参照の値をすべて `<concealed by kakusu>` に置き換えます。`DB_HOST=localhost` のような `.env` ファイルのリテラル値はそのまま出力されます。値はどこに現れてもすべて置き換えるため、`1` や `true` のような短い値やありふれた値では、出力の多くが隠れることがあります。
+
+```bash
+kakusu run -- printenv DB_PASSWORD | cat
+# <concealed by kakusu>
+```
+
+次のものは隠されません。
+
+- 端末への出力（コマンドを疑似端末で実行する AI ツールを含む）
+- コマンドが変換した値（base64、URL や JSON のエスケープ、値の一部など）。値はバイト単位で照合するため、改行が LF ではなく CRLF で出力された複数行の値も隠されません
+- コマンドが stdout や stderr ではなく、ファイル・`/dev/tty`・ネットワークに書き出した値
+- `--no-masking` を付けたときの出力。パイプで値を渡すときに使います: `kakusu run --no-masking -- printenv DB_PASSWORD | other-command`
+
+隠している間、`kakusu run` はコマンドを自分と同じプロセスグループの子として実行し、コマンドの出力をパイプで中継します。そのため、コマンドを直接実行したときと次の点が異なります。
+
+- `kakusu run` はコマンドが終了し、その出力が終わってから終了します。コマンドが起動して出力を開いたままにするバックグラウンドプロセスがあると、Ctrl-C などのシグナルで止めるまで `kakusu run` は終了しません。
+- `kakusu run` の出力がファイルでも、コマンドが書く先はパイプです。そのため、出力をシークするコマンドは "Illegal seek" で失敗します。`--no-masking` を使うか、コマンド自身にファイルを書かせてください。
+- Unix では、`kakusu run` は受け取ったシグナルをコマンドに渡します。そのため、プロセスグループ全体に送ったシグナル（`kill -TERM -<PGID>`）はコマンドに 2 回届きます。端末の前景にある `kakusu run` だけに送った SIGINT や SIGQUIT は、端末がコマンドにも送るものとして、コマンドに渡しません。
+- （Unix で）読み手がいなくなって出力を書けなかったときは、コマンドの終了ステータスで終了します。コマンドが成功していた場合は、シェルが SIGPIPE による終了を表すのと同じ終了ステータス 141 で終了します。ディスクがいっぱいなど他の理由で書けなかったときは、コマンドの結果にかかわらず、エラーを出して終了ステータス 1 で終了します。
+
+`--no-masking` を付けると、コマンドはシグナルも出力も直接実行したときと同じように動きます。
+
 ## 環境変数
 
 | 変数                | 説明              | デフォルト                   |
@@ -190,7 +216,7 @@ eval "$(kakusu export)"
 
 kakusu は `.env` ファイルの平文保護（ディスク上に秘密を置かない）を提供しますが、`export` でシェルに展開した値は通常の環境変数となり、同一シェルで動作するツールからアクセス可能です。`kakusu run` を使えば、親シェルに平文環境変数を残しません。ただし、実行対象プロセスとその子孫、プロセス監視ツールからはアクセス可能であり、`export` より露出範囲を狭める手段です。
 
-鍵がキャッシュされている間も、その場でパスワードを入力しない限り kakusu 自身は値を出力しません。ただし `kakusu run` で起動したプロセスには値が渡るため、`kakusu run` の実行を許可された AI ツールは値を出力できます（例: `kakusu run -- printenv`）。許可するかどうかは AI ツールの権限設定で決めてください。
+鍵がキャッシュされている間も、その場でパスワードを入力しない限り kakusu 自身は値を出力しません。ただし `kakusu run` で起動したプロセスには値が渡ります。`kakusu run` は、それらのプロセスが端末でない出力にそのまま書いた値を隠しますが（「`run` の出力での値の隠蔽」を参照）、`kakusu run` の実行を許可された AI ツールは、そこに挙げた方法で値を得られます。たとえば、変換して出力する（`kakusu run -- sh -c 'printenv DB_PASSWORD | base64'`）か、`--no-masking` を付けます。`kakusu run` と `--no-masking` を許可するかどうかは AI ツールの権限設定で決めてください。
 
 kakusu は同じユーザーのプロセスを区別できず、どのプロセスもエージェントからキャッシュした鍵を受け取れます。`~/.kakusu` へのアクセスを防ぐのは AI ツールのサンドボックスの役割です。作業を終えたら `kakusu lock` でキャッシュを消去してください。
 
