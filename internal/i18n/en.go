@@ -10,6 +10,7 @@ var catalogEN = messages{
 	MsgErrPasswordWrong:      "wrong password (or corrupted vault)",
 	MsgErrUnresolvedRefs:     "unresolved kks:// references:\n%s",
 	MsgErrRefDetail:          "  line %d: %s -> kks://%s/%s",
+	MsgErrRefMalformed:       "  line %d: %s -> %s (malformed; write kks://group/key or kks://key without whitespace)",
 	MsgErrSecretNotFound:     "kks://%s/%s not found",
 	MsgErrGroupNotFound:      "group '%s' not found",
 	MsgErrEnvFileNotFound:    ".env file not found: %s",
