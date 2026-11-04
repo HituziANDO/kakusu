@@ -541,6 +541,14 @@ func TestRunFailsWhenOutputIsLost(t *testing.T) {
 			t.Errorf("exit %d, stderr %q; want exit 1 and the write error", r.code, r.stderr)
 		}
 	})
+	t.Run("held_bytes_lost", func(t *testing.T) {
+		// The output is the start of the value, which kakusu holds until the
+		// output ends and then fails to write.
+		r := run(t, readOnly(t), `printf %s "${X%?}"`)
+		if r.code != 1 || !strings.Contains(r.stderr, "bad file descriptor") {
+			t.Errorf("exit %d, stderr %q; want exit 1 and the write error", r.code, r.stderr)
+		}
+	})
 	t.Run("failing_command_wins", func(t *testing.T) {
 		if r := run(t, readOnly(t), `echo "$X"; exit 7`); r.code != 7 {
 			t.Errorf("exit %d, stderr %q; want 7 from the command", r.code, r.stderr)
