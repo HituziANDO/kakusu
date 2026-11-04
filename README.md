@@ -16,7 +16,7 @@ Write `kks://group/key` references in your `.env` files, and kakusu resolves the
 - **Agent** for master password caching (ssh-agent pattern)
 - Fully local — no external services required
 - **Multi-language support**: English (default) / Japanese, switchable via environment variable
-- Minimal dependencies (`cobra` + `golang.org/x/term`)
+- Minimal dependencies (`cobra` + `golang.org/x/term` + `golang.org/x/sys`)
 
 ## Supported Platforms
 
@@ -165,7 +165,7 @@ eval "$(kakusu export myproject)"
 
 ## Concealing Values in `run` Output
 
-When stdout or stderr is not a terminal (a pipe or a file, as when an AI tool or CI runs the command), `kakusu run` replaces every value resolved from a `kks://` reference that appears as is in that output with `<concealed by kakusu>`. Literal values in the `.env` file, such as `DB_HOST=localhost`, are printed as is.
+When stdout or stderr is not a terminal (a pipe or a file, as when an AI tool or CI runs the command), `kakusu run` replaces every value resolved from a `kks://` reference that appears as is in that output with `<concealed by kakusu>`. Literal values in the `.env` file, such as `DB_HOST=localhost`, are printed as is. Every occurrence is replaced wherever it appears, so a short or common value such as `1` or `true` may conceal much of the output.
 
 ```bash
 kakusu run -- printenv DB_PASSWORD | cat
@@ -175,11 +175,18 @@ kakusu run -- printenv DB_PASSWORD | cat
 The following are not concealed:
 
 - Output to a terminal, including AI tools that run commands in a pseudo-terminal
-- Values the command transforms, such as base64, URL or JSON escaping, or part of a value
+- Values the command transforms, such as base64, URL or JSON escaping, or part of a value. Values are matched byte for byte, so a multi-line value printed with CRLF line endings instead of LF is not concealed either
 - Values the command writes to files, `/dev/tty`, or the network instead of its stdout or stderr
 - Output with `--no-masking`. Use it to pass a value through a pipe: `kakusu run --no-masking -- printenv DB_PASSWORD | other-command`
 
-`kakusu run` exits after the command exits and its output ends, so a background process that the command starts and that keeps the output open keeps `kakusu run` running.
+While concealing, `kakusu run` runs the command as a child in the same process group and relays the command's output through a pipe. This differs from running the command directly:
+
+- `kakusu run` exits after the command exits and its output ends. A background process that the command starts and that keeps the output open keeps `kakusu run` running until a signal, such as Ctrl-C, ends it.
+- The command writes to a pipe even when the output of `kakusu run` is a file, so a command that seeks in its output fails with "Illegal seek". Use `--no-masking`, or let the command write the file itself.
+- On Unix, `kakusu run` passes on the signals it receives, so a signal sent to the whole process group (`kill -TERM -<PGID>`) reaches the command twice. SIGINT or SIGQUIT sent to `kakusu run` alone while it is in the terminal's foreground is not passed on, because the terminal sends them to the command too.
+- If the command succeeds but its output cannot be written, `kakusu run` exits with status 141, as a shell reports a death by SIGPIPE, when the reader has gone on Unix, and with status 1 and the error otherwise. A command that fails decides the exit status itself.
+
+With `--no-masking`, the command runs as if run directly, with the same signals and output.
 
 ## Environment Variables
 

@@ -87,11 +87,15 @@ kakusu - local secrets manager
   When stdout or stderr is not a terminal, run replaces each value from a
   kks:// ref in that output with <concealed by kakusu>. Not concealed: output
   to a terminal (including AI tools that use a pseudo-terminal), transformed
-  values (base64, escaped, partial), values the command writes elsewhere
-  (files, /dev/tty, network), and output with --no-masking, which passes
-  values through a pipe. A background process that keeps the output open
-  keeps run from exiting. Decide in an AI tool's permission settings whether
-  it may use run and --no-masking.
+  values (base64, escaped, partial, or with LF printed as CRLF), values the
+  command writes elsewhere (files, /dev/tty, network), and output with
+  --no-masking, which passes values through a pipe. While concealing, a
+  background process that keeps the output open keeps run from exiting until
+  a signal ends it, a signal sent to the whole process group reaches the
+  command twice, and SIGINT or SIGQUIT sent to run alone in the terminal's
+  foreground is not passed on. With --no-masking, the command runs as if run
+  directly. Decide in an AI tool's permission settings whether it may use run
+  and --no-masking.
 
 [.env File Format]
   DB_HOST=localhost
