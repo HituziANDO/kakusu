@@ -130,7 +130,7 @@ DB_PASSWORD=kks://myproject/db_password
 OPENAI_API_KEY=kks://shared/openai_key
 ```
 
-`kakusu run` or `kakusu export` replaces `kks://group/key` with actual values.
+`kakusu run` or `kakusu export` replaces `kks://group/key` with actual values. With `kakusu run`, a variable set in the `.env` file replaces an inherited environment variable of the same name.
 
 ```bash
 # Run directly

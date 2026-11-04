@@ -130,7 +130,7 @@ DB_PASSWORD=kks://myproject/db_password
 OPENAI_API_KEY=kks://shared/openai_key
 ```
 
-`kakusu run` または `kakusu export` を使うと、`kks://group/key` が実際の値に置換されます。
+`kakusu run` または `kakusu export` を使うと、`kks://group/key` が実際の値に置換されます。`kakusu run` では、`.env` ファイルで設定した変数が、同じ名前の継承した環境変数を置き換えます。
 
 ```bash
 # 直接実行
