@@ -32,6 +32,23 @@ func TestEncryptDecryptRoundTrip(t *testing.T) {
 	}
 }
 
+func TestEncryptUsesNewNonceEachTime(t *testing.T) {
+	key := randomKey()
+	plaintext := []byte("dummy-secret")
+
+	a, err := EncryptData(plaintext, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := EncryptData(plaintext, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(a[:NonceSize], b[:NonceSize]) {
+		t.Errorf("two EncryptData calls used the same nonce %x", a[:NonceSize])
+	}
+}
+
 func TestDecryptFailsOnAnyFlippedByte(t *testing.T) {
 	key := randomKey()
 	blob, err := EncryptData([]byte("dummy-secret"), key)
