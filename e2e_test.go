@@ -75,7 +75,7 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
-var promptRe = regexp.MustCompile(`(?:password|Confirm|\[y/N\]): `)
+var promptRe = regexp.MustCompile(`(?:password|Confirm|value|\[y/N\]): `)
 
 // kakusuCmd prepares the binary to run under home with only this environment
 // and extraEnv, in a new session.
@@ -432,6 +432,7 @@ var (
 	masterPromptRe = regexp.MustCompile(`Master password: `)
 	waitingRe      = regexp.MustCompile(`waiting for another kakusu command to release `)
 	changedRe      = regexp.MustCompile(`vault file changed after it was loaded`)
+	confirmRe      = regexp.MustCompile(`\[y/N\]: `)
 )
 
 // newNoAgentVault initializes an empty vault under a new HOME for tests that
@@ -616,4 +617,76 @@ func TestInitOverwritesExistingVault(t *testing.T) {
 	home := newNoAgentVault(t)
 	mustSucceed(t, kakusu(t, home, noAgent, []string{"y", "NEWPASS12", "NEWPASS12"}, "init"))
 	mustSucceed(t, kakusu(t, home, noAgent, []string{"NEWPASS12"}, "list"))
+}
+
+func TestSetWaitsWhileDeleteHoldsLock(t *testing.T) {
+	home := newNoAgentVault(t)
+	mustSucceed(t, kakusu(t, home, noAgent, []string{testPassword}, "set", "race/x", "1"))
+	d := startKakusu(t, home, noAgent, "delete", "race/x")
+	d.send(testPassword)
+	d.waitFor(confirmRe)
+	s := startKakusu(t, home, noAgent, "set", "race/a", "1")
+	s.send(testPassword)
+	// Without the lock, set saves and exits here, and delete then saves nothing.
+	s.waitFor(waitingRe)
+	d.send("y")
+	mustSucceed(t, d.wait())
+	mustSucceed(t, s.wait())
+
+	r := mustSucceed(t, kakusu(t, home, noAgent, []string{testPassword}, "list", "race"))
+	if want := "\n[race]\n  a  ***\n\n"; r.stdout != want {
+		t.Errorf("list stdout %q; want %q", r.stdout, want)
+	}
+}
+
+func TestSetWaitsWhileInitHoldsLock(t *testing.T) {
+	home := newNoAgentVault(t)
+	i := startKakusu(t, home, noAgent, "init")
+	i.waitFor(confirmRe)
+	s := startKakusu(t, home, noAgent, "set", "race/a", "1")
+	s.send("NEWPASS12")
+	// Without the lock, set loads the old vault here and rejects the password.
+	s.waitFor(waitingRe)
+	i.send("y", "NEWPASS12", "NEWPASS12")
+	mustSucceed(t, i.wait())
+	mustSucceed(t, s.wait())
+
+	if r := mustSucceed(t, kakusu(t, home, noAgent, []string{"NEWPASS12"}, "get", "race/a")); r.stdout != "1\n" {
+		t.Errorf("get stdout %q; want %q", r.stdout, "1\n")
+	}
+}
+
+func TestSetAsksForValueBeforeWaitingForLock(t *testing.T) {
+	home := newNoAgentVault(t)
+	a := startKakusu(t, home, noAgent, "set", "race/a", "1")
+	a.waitFor(masterPromptRe)
+	v := startKakusu(t, home, noAgent, "set", "race/v")
+	v.send("V", testPassword)
+	v.waitFor(waitingRe)
+	a.send(testPassword)
+	mustSucceed(t, a.wait())
+
+	rv := mustSucceed(t, v.wait())
+	if want := "race/v value: waiting for another kakusu command to release "; !strings.HasPrefix(rv.stderr, want) {
+		t.Errorf("stderr %q; want it to start with %q", rv.stderr, want)
+	}
+}
+
+func TestLockFileFollowsKakusuFile(t *testing.T) {
+	home := newHome(t)
+	vaultPath := filepath.Join(home, "other", "v.enc")
+	env := append([]string{"KAKUSU_FILE=" + vaultPath}, noAgent...)
+	mustSucceed(t, kakusu(t, home, env, []string{testPassword, testPassword}, "init"))
+	a := startKakusu(t, home, env, "set", "race/a", "1")
+	a.waitFor(masterPromptRe)
+	b := startKakusu(t, home, env, "set", "race/b", "2")
+	b.send(testPassword)
+	b.waitFor(waitingRe)
+	a.send(testPassword)
+	mustSucceed(t, a.wait())
+
+	rb := mustSucceed(t, b.wait())
+	if want := "waiting for another kakusu command to release " + vaultPath + ".lock\n"; !strings.Contains(rb.stderr, want) {
+		t.Errorf("stderr %q; want %q", rb.stderr, want)
+	}
 }
