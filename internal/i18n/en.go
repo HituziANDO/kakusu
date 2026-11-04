@@ -19,6 +19,7 @@ var catalogEN = messages{
 	MsgErrAgentConnFailed:    "cannot connect to agent",
 	MsgErrUnknownCommand:     "unknown command '%s'",
 	MsgErrVaultNotFound:      "vault not found. run 'kakusu init' first",
+	MsgErrInvalidExportNames: "cannot export names that are not shell variable names (use only ASCII letters, digits, and _, not starting with a digit): %s",
 
 	// Usage
 	MsgUsageSet:    "usage: kakusu set <group/key> [value]",
