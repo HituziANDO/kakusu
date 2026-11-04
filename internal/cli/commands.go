@@ -338,7 +338,7 @@ var runCmd = &cobra.Command{
 			return
 		}
 
-		c := &exec.Cmd{Path: bin, Args: args, Env: env, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}
+		c := &exec.Cmd{Path: bin, Args: platform.ChildArgs(bin, args), Env: env, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}
 		var relays []*relay
 		pipe := func(out *os.File) *os.File {
 			r, err := newRelay(out, secrets)

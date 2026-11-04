@@ -25,6 +25,12 @@ func ExecRun(bin string, args []string, env []string) error {
 	return syscall.Exec(bin, args, env)
 }
 
+// ChildArgs returns the argument list for running bin, which was found for
+// args[0], as a child: args as typed, as ExecRun passes them.
+func ChildArgs(bin string, args []string) []string {
+	return args
+}
+
 // forwardedSignals are the signals that RunChild passes on to the command.
 // SIGTSTP and SIGWINCH are not caught: the command gets them itself from the
 // terminal. RunChild catches SIGPIPE without passing it on.

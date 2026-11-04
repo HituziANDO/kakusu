@@ -33,6 +33,15 @@ func ExecRun(bin string, args []string, env []string) error {
 	return nil
 }
 
+// ChildArgs returns the argument list for running bin, which was found for
+// args[0], as a child: args with bin in place of args[0], as ExecRun passes
+// them. Windows runs a .bat or .cmd file through cmd.exe, which reads the
+// command name from the argument list and may look up the name as typed
+// again, finding another file than bin.
+func ChildArgs(bin string, args []string) []string {
+	return append([]string{bin}, args[1:]...)
+}
+
 // RunChild runs cmd. outputs are kakusu's copies of the pipe ends given to
 // cmd; RunChild closes them once cmd has started. It returns after cmd has
 // exited and drained is closed, which happens when every pipe has been read
