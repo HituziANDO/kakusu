@@ -60,6 +60,8 @@ const (
 	MsgKeyCachePresent = "status.key_cache_present"
 	MsgKeyCacheNone    = "status.key_cache_none"
 	MsgKeyCacheCleared = "status.key_cache_cleared"
+	MsgWaitingForLock  = "status.waiting_for_lock"
+	MsgLockUnsupported = "status.lock_unsupported"
 
 	// Help / version
 	MsgHelp    = "help.full"

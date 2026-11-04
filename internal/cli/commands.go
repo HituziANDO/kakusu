@@ -79,6 +79,39 @@ func loadVaultAskingPassword() *vault.State {
 	return s
 }
 
+// vaultLock keeps the lock file open until the process exits. Without a
+// reference to it, the garbage collector could close it and release the lock.
+var vaultLock *os.File
+
+// lockVault makes the commands that change the vault run one at a time on this
+// device. It takes an exclusive lock on a file next to the vault, waiting while
+// another process holds it, and keeps it until the process exits. The vault
+// itself is not locked, because Save replaces it with a new file. The lock file
+// is never deleted: a process could then lock a new file while another still
+// held the old one. Call it once, before the command reads the vault.
+func lockVault() {
+	path := config.KakusuFile() + ".lock"
+	if err := os.MkdirAll(config.KakusuDir(), 0700); err != nil {
+		ui.Die(err.Error())
+	}
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0600)
+	if err != nil {
+		ui.Die(err.Error())
+	}
+	locked, err := platform.TryLock(f)
+	if err == nil && !locked {
+		fmt.Fprintln(os.Stderr, i18n.Msgf(i18n.MsgWaitingForLock, path))
+		err = platform.Lock(f)
+	}
+	if err != nil {
+		if !platform.LockUnsupported(err) {
+			ui.Die(fmt.Sprintf("%s: %v", path, err))
+		}
+		fmt.Fprintln(os.Stderr, i18n.Msgf(i18n.MsgLockUnsupported, path, err))
+	}
+	vaultLock = f
+}
+
 // ---------------------------------------------------------------------------
 // init
 // ---------------------------------------------------------------------------
@@ -87,6 +120,7 @@ var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize vault (set master password)",
 	Run: func(cmd *cobra.Command, args []string) {
+		lockVault()
 		path := config.KakusuFile()
 		if _, err := os.Stat(path); err == nil {
 			if !ui.Confirm(i18n.Msg(i18n.MsgPromptOverwrite)) {
@@ -140,6 +174,7 @@ var setCmd = &cobra.Command{
 			}
 		}
 
+		lockVault()
 		s := loadVault(true)
 		vault.SetSecret(s.Data, group, key, value)
 		if err := s.Save(); err != nil {
@@ -254,6 +289,7 @@ var deleteCmd = &cobra.Command{
 			ui.Die(i18n.Msg(i18n.MsgUsageDelete))
 		}
 		group, key := vault.ParseRef(args[0])
+		lockVault()
 		s := loadVault(false)
 		if _, ok := vault.GetSecret(s.Data, group, key); !ok {
 			ui.Die(i18n.Msgf(i18n.MsgErrSecretNotFound, group, key))
@@ -396,6 +432,7 @@ var passwdCmd = &cobra.Command{
 	Use:   "passwd",
 	Short: "Change master password",
 	Run: func(cmd *cobra.Command, args []string) {
+		lockVault()
 		s := loadVaultAskingPassword()
 		newPw, err := ui.PromptNewPassword()
 		if err != nil {

@@ -53,6 +53,8 @@ var catalogJA = messages{
 	MsgKeyCachePresent: "鍵キャッシュ: あり（残り %s）",
 	MsgKeyCacheNone:    "鍵キャッシュ: なし",
 	MsgKeyCacheCleared: "鍵キャッシュを消去しました",
+	MsgWaitingForLock:  "別の kakusu コマンドが %s を解放するのを待っています",
+	MsgLockUnsupported: "警告: %s をロックできません（%v）。ロックせずに続行します",
 
 	// ヘルプ（全文）
 	MsgHelp: `

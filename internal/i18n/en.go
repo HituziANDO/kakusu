@@ -53,6 +53,8 @@ var catalogEN = messages{
 	MsgKeyCachePresent: "Key cache: active (%s remaining)",
 	MsgKeyCacheNone:    "Key cache: none",
 	MsgKeyCacheCleared: "key cache cleared",
+	MsgWaitingForLock:  "waiting for another kakusu command to release %s",
+	MsgLockUnsupported: "warning: cannot lock %s (%v). continuing without the lock",
 
 	// Help (full text)
 	MsgHelp: `
