@@ -274,10 +274,10 @@ func TestEnvRefWithoutGroupUsesDefaultGroup(t *testing.T) {
 	}
 
 	t.Run("run", func(t *testing.T) {
-		r := mustSucceed(t, kakusu(t, home, nil, nil, "run", "--env", envFile, "--", "printenv", "OPENAI_API_KEY"))
-		if want := value + "\n"; r.stdout != want {
-			t.Errorf("stdout %q; want %q", r.stdout, want)
-		}
+		// The command checks the value itself instead of printing it, so the
+		// result does not depend on how run passes on the command's output.
+		mustSucceed(t, kakusu(t, home, nil, nil, "run", "--env", envFile, "--",
+			"sh", "-c", `test "$OPENAI_API_KEY" = `+value))
 	})
 	t.Run("export", func(t *testing.T) {
 		r := mustSucceed(t, kakusu(t, home, nil, []string{testPassword}, "export", "--env", envFile))
