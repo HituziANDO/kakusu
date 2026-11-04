@@ -33,9 +33,9 @@ func startServe(t *testing.T, ttl, maxKeyAge time.Duration, wallNow func() time.
 }
 
 // fakeWall is a wall clock that only the test moves. Moving it forward plays
-// a system sleep: the wall clock advances while the monotonic clock, which the
-// TTL runs on, does not. It starts years away from the real clock, so that a
-// check that reads the real clock instead of it fails.
+// a system sleep: the wall clock advances while the monotonic clock, which
+// keyTimer runs on, does not. It starts years away from the real clock, so
+// that a check that reads the real clock instead of it fails.
 type fakeWall struct {
 	mu sync.Mutex
 	t  time.Time
@@ -129,14 +129,14 @@ func TestKeyExpiresTTLAfterGetKeyOnWallClock(t *testing.T) {
 
 func TestKeyExpiresMaxKeyAgeAfterSetKeyOnWallClock(t *testing.T) {
 	wall := newFakeWall()
-	startServe(t, time.Hour, 8*time.Hour, wall.now)
+	startServe(t, 8*time.Hour, 8*time.Hour, wall.now)
 	mustSetKey(t)
 
 	wall.advance(8*time.Hour - time.Minute)
 	if mustGetKey(t) == nil {
 		t.Fatal("GET_KEY 1m before maxKeyAge: NO_KEY; want the key")
 	}
-	// That GET_KEY extended the TTL to 1h, but only 1m remains until maxKeyAge.
+	// That GET_KEY extended the TTL to 8h, but only 1m remains until maxKeyAge.
 	if resp := mustQueryStatus(t); !resp.HasKey || resp.RemainingSeconds != 60 {
 		t.Errorf("STATUS 1m before maxKeyAge: HasKey %v, RemainingSeconds %d; want true, 60", resp.HasKey, resp.RemainingSeconds)
 	}
@@ -152,7 +152,7 @@ func TestKeyExpiresMaxKeyAgeAfterSetKeyOnWallClock(t *testing.T) {
 
 func TestSetKeyRestartsMaxKeyAge(t *testing.T) {
 	wall := newFakeWall()
-	startServe(t, time.Hour, 8*time.Hour, wall.now)
+	startServe(t, 8*time.Hour, 8*time.Hour, wall.now)
 	mustSetKey(t)
 	wall.advance(5 * time.Hour)
 	mustSetKey(t)
@@ -175,21 +175,21 @@ func TestSetKeyRestartsMaxKeyAge(t *testing.T) {
 }
 
 func TestGetKeyExtendsTTL(t *testing.T) {
-	// The wall clock stands still, so maxKeyAge stays out of the way.
-	startServe(t, time.Second, 8*time.Hour, newFakeWall().now)
+	wall := newFakeWall()
+	startServe(t, time.Hour, 8*time.Hour, wall.now)
 	mustSetKey(t)
 
-	// GET_KEY every 100ms keeps the key past twice the TTL. This fails only
-	// if two GET_KEYs are more than the TTL apart.
-	for start := time.Now(); time.Since(start) < 2200*time.Millisecond; time.Sleep(100 * time.Millisecond) {
+	// GET_KEY every 50m keeps the key past twice the TTL.
+	for elapsed := 50 * time.Minute; elapsed <= 150*time.Minute; elapsed += 50 * time.Minute {
+		wall.advance(50 * time.Minute)
 		if mustGetKey(t) == nil {
-			t.Fatalf("GET_KEY %v after SET_KEY: NO_KEY; want the key", time.Since(start))
+			t.Fatalf("GET_KEY %v after SET_KEY: NO_KEY; want the key", elapsed)
 		}
 	}
 	// With no GET_KEY for longer than the TTL, the key expires.
-	time.Sleep(1500 * time.Millisecond)
+	wall.advance(time.Hour + time.Second)
 	if mustGetKey(t) != nil {
-		t.Error("GET_KEY 1.5s after the previous one: got the key; want NO_KEY")
+		t.Error("GET_KEY 1h1s after the previous one: got the key; want NO_KEY")
 	}
 }
 

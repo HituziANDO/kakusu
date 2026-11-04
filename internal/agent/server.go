@@ -34,8 +34,8 @@ func wallClock() time.Time {
 	return time.Now().Round(0)
 }
 
-// serve is Serve with the clock for the maxKeyAge deadline passed in, so that
-// tests can move it forward as a system sleep would.
+// serve is Serve with the clock for the TTL and the maxKeyAge deadline passed
+// in, so that tests can move it forward as a system sleep would.
 func serve(ttlDur, maxKeyAge time.Duration, wallNow func() time.Time) {
 	if ttlDur > maxKeyAge {
 		ttlDur = maxKeyAge
@@ -76,16 +76,17 @@ func serve(ttlDur, maxKeyAge time.Duration, wallNow func() time.Time) {
 	platform.IgnoreHUP()
 
 	var cachedKey, cachedSalt []byte
-	// expiresAt slides on GET_KEY. keyDeadline is set on SET_KEY and is on the
-	// wall clock, so it passes even if the system sleeps through it.
+	// expiresAt slides on GET_KEY. keyDeadline is set on SET_KEY. Both are on
+	// the wall clock, so they pass even if the system sleeps through them.
 	var expiresAt, keyDeadline time.Time
 
 	// keyRemaining is how long the cached key stays valid: until the TTL
 	// expires or keyDeadline passes, whichever comes first. Every request
 	// checks it, because keyTimer can fire late after a sleep.
 	keyRemaining := func() time.Duration {
-		r := time.Until(expiresAt)
-		if d := keyDeadline.Sub(wallNow()); d < r {
+		now := wallNow()
+		r := expiresAt.Sub(now)
+		if d := keyDeadline.Sub(now); d < r {
 			r = d
 		}
 		return r
@@ -125,7 +126,7 @@ func serve(ttlDur, maxKeyAge time.Duration, wallNow func() time.Time) {
 					resp.Status = "OK"
 					resp.Key = base64.StdEncoding.EncodeToString(cachedKey)
 					resp.Salt = base64.StdEncoding.EncodeToString(cachedSalt)
-					expiresAt = time.Now().Add(ttlDur)
+					expiresAt = wallNow().Add(ttlDur)
 					stopTimer(keyTimer)
 					keyTimer.Reset(keyRemaining())
 				} else {
@@ -142,7 +143,7 @@ func serve(ttlDur, maxKeyAge time.Duration, wallNow func() time.Time) {
 				clearKey()
 				cachedKey, _ = base64.StdEncoding.DecodeString(req.Key)
 				cachedSalt, _ = base64.StdEncoding.DecodeString(req.Salt)
-				expiresAt = time.Now().Add(ttlDur)
+				expiresAt = wallNow().Add(ttlDur)
 				keyDeadline = wallNow().Add(maxKeyAge)
 				stopTimer(keyTimer)
 				keyTimer.Reset(ttlDur)
