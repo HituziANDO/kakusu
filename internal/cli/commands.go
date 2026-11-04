@@ -83,6 +83,20 @@ func loadVaultAskingPassword(prompt string) *vault.State {
 	return s
 }
 
+// envFileForPrompt returns the env file path to show in the password prompt:
+// absolute, but not cleaned, so that it names the file that is opened. Cleaning
+// "link/../x.env" to "x.env" would name another file when link is a symlink.
+func envFileForPrompt(envFile string) string {
+	if filepath.IsAbs(envFile) {
+		return envFile
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		ui.Die(err.Error())
+	}
+	return wd + string(filepath.Separator) + envFile
+}
+
 // ---------------------------------------------------------------------------
 // init
 // ---------------------------------------------------------------------------
@@ -291,15 +305,11 @@ var runCmd = &cobra.Command{
 			ui.Die(i18n.Msgf(i18n.MsgErrEnvFileNotFound, envFile))
 		}
 
-		absEnv, err := filepath.Abs(envFile)
-		if err != nil {
-			ui.Die(err.Error())
-		}
 		quoted := make([]string, len(args))
 		for i, a := range args {
 			quoted[i] = strconv.Quote(a)
 		}
-		s := loadVault(false, i18n.Msgf(i18n.MsgPromptPasswordToRun, strings.Join(quoted, " "), absEnv))
+		s := loadVault(false, i18n.Msgf(i18n.MsgPromptPasswordToRun, strings.Join(quoted, " "), envFileForPrompt(envFile)))
 		injected, err := vault.ResolveDotenv(envFile, s.Data)
 		if err != nil {
 			ui.Die(err.Error())
@@ -379,11 +389,7 @@ var exportCmd = &cobra.Command{
 			return
 		}
 
-		absEnv, err := filepath.Abs(envFile)
-		if err != nil {
-			ui.Die(err.Error())
-		}
-		s := loadVaultAskingPassword(i18n.Msgf(i18n.MsgPromptPasswordToPrintEnv, absEnv))
+		s := loadVaultAskingPassword(i18n.Msgf(i18n.MsgPromptPasswordToPrintEnv, envFileForPrompt(envFile)))
 		injected, err := vault.ResolveDotenv(envFile, s.Data)
 		if err != nil {
 			ui.Die(err.Error())

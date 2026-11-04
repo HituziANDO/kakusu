@@ -328,6 +328,44 @@ func TestPasswordPromptEscapesTarget(t *testing.T) {
 	}
 }
 
+// link is a symlink to real/sub, so link/../x.env opens real/x.env. Cleaning
+// the path to x.env would name another file, which does not exist here.
+func TestPasswordPromptShowsEnvFileAsOpened(t *testing.T) {
+	home := newVault(t)
+	if err := os.MkdirAll(filepath.Join(home, "real", "sub"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "real", "x.env"), []byte("X=kks://app/db_password\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("real", "sub"), filepath.Join(home, "link")); err != nil {
+		t.Fatal(err)
+	}
+	realHome, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shown := `"` + realHome + `/link/../x.env"`
+	for _, tc := range []struct {
+		name string
+		env  []string
+		args []string
+		want string
+	}{
+		{"export", nil, []string{"export", "--env", "link/../x.env"},
+			`To print the values that ` + shown + ` refers to, enter the master password: `},
+		{"run", []string{"KAKUSU_NO_AGENT=1"}, []string{"run", "--env", "link/../x.env", "--", "printenv", "X"},
+			`To run "printenv" "X" with the values that ` + shown + ` refers to, enter the master password: `},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := kakusu(t, home, tc.env, nil, tc.args...)
+			if got := promptBeforeError(r.stderr); got != tc.want {
+				t.Errorf("prompt %q; want %q (exit %d)", got, tc.want, r.code)
+			}
+		})
+	}
+}
+
 func TestGetWithPasswordPrintsValueAndCachesKey(t *testing.T) {
 	home := newVault(t)
 	mustSucceed(t, kakusu(t, home, nil, nil, "agent", "stop"))
