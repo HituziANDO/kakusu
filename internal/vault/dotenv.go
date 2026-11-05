@@ -4,15 +4,15 @@ import (
 	"bufio"
 	"errors"
 	"os"
-	"regexp"
 	"strings"
 
 	"github.com/HituziANDO/kakusu/internal/i18n"
 )
 
-var RefRe = regexp.MustCompile(`^kks://([^/\s]+)/([^\s]+)$`)
-
 // ResolveDotenv parses an env file, resolving kks:// references against the vault data.
+// A value that starts with kks:// is a reference: kks://group/key, or kks://key
+// for the default group. A reference with an empty group or key, with
+// whitespace, or to a missing secret is an error.
 func ResolveDotenv(envPath string, data Data) (map[string]string, error) {
 	f, err := os.Open(envPath)
 	if err != nil {
@@ -44,9 +44,13 @@ func ResolveDotenv(envPath string, data Data) (map[string]string, error) {
 			}
 		}
 
-		m := RefRe.FindStringSubmatch(rawVal)
-		if m != nil {
-			group, key := m[1], m[2]
+		if strings.HasPrefix(rawVal, "kks://") {
+			group, key := ParseRef(rawVal)
+			// Whitespace means the characters \s matches in Go regexp.
+			if group == "" || key == "" || strings.ContainsAny(rawVal, " \t\n\f\r") {
+				missing = append(missing, i18n.Msgf(i18n.MsgErrRefMalformed, lineno, envKey, rawVal))
+				continue
+			}
 			secret, ok := GetSecret(data, group, key)
 			if !ok {
 				missing = append(missing, i18n.Msgf(i18n.MsgErrRefDetail, lineno, envKey, group, key))

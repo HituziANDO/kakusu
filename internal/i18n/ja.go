@@ -10,6 +10,7 @@ var catalogJA = messages{
 	MsgErrPasswordWrong:      "パスワードが違います（または kakusu が破損しています）",
 	MsgErrUnresolvedRefs:     "以下の kks:// 参照が解決できませんでした:\n%s",
 	MsgErrRefDetail:          "  line %d: %s → kks://%s/%s",
+	MsgErrRefMalformed:       "  line %d: %s → %s（形式が不正です。空白を含めず kks://group/key か kks://key と書いてください）",
 	MsgErrSecretNotFound:     "kks://%s/%s は存在しません",
 	MsgErrGroupNotFound:      "グループ '%s' は存在しません",
 	MsgErrEnvFileNotFound:    ".env ファイルが見つかりません: %s",
@@ -19,6 +20,7 @@ var catalogJA = messages{
 	MsgErrAgentConnFailed:    "エージェントに接続できません",
 	MsgErrUnknownCommand:     "不明なコマンド '%s'",
 	MsgErrVaultNotFound:      "Kakusu が見つかりません。先に 'kakusu init' を実行してください",
+	MsgErrInvalidExportNames: "シェルの変数名として使えない名前は export できません（半角英数字と _ のみ、先頭は数字以外）: %s",
 
 	// 使い方
 	MsgUsageSet:    "使い方: kakusu set <group/key> [value]",

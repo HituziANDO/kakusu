@@ -17,6 +17,7 @@ const (
 	MsgErrPasswordWrong      = "err.password_wrong"
 	MsgErrUnresolvedRefs     = "err.unresolved_refs"
 	MsgErrRefDetail          = "err.ref_detail"
+	MsgErrRefMalformed       = "err.ref_malformed"
 	MsgErrSecretNotFound     = "err.secret_not_found"
 	MsgErrGroupNotFound      = "err.group_not_found"
 	MsgErrEnvFileNotFound    = "err.env_file_not_found"
@@ -26,6 +27,7 @@ const (
 	MsgErrAgentConnFailed    = "err.agent_conn_failed"
 	MsgErrUnknownCommand     = "err.unknown_command"
 	MsgErrVaultNotFound      = "err.vault_not_found"
+	MsgErrInvalidExportNames = "err.invalid_export_names"
 
 	// Usage
 	MsgUsageSet    = "usage.set"

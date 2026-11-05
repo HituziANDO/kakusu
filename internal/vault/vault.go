@@ -50,7 +50,10 @@ func LoadKakusu(password string, allowCreate, useCache bool, promptPw, promptNew
 		if _, err := io.ReadFull(rand.Reader, salt); err != nil {
 			return nil, err
 		}
-		key := crypto.DeriveKey(password, salt)
+		key, err := crypto.DeriveKey(password, salt)
+		if err != nil {
+			return nil, err
+		}
 		if !noAgent {
 			if err := agent.EnsureAgent(); err == nil {
 				agent.SetKey(key, salt)
@@ -102,7 +105,10 @@ func LoadKakusu(password string, allowCreate, useCache bool, promptPw, promptNew
 		}
 	}
 
-	key := crypto.DeriveKey(password, salt)
+	key, err := crypto.DeriveKey(password, salt)
+	if err != nil {
+		return nil, err
+	}
 	plaintext, err := crypto.DecryptData(blob, key)
 	if err != nil {
 		return nil, errors.New(i18n.Msg(i18n.MsgErrPasswordWrong))

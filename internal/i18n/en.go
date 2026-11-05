@@ -10,6 +10,7 @@ var catalogEN = messages{
 	MsgErrPasswordWrong:      "wrong password (or corrupted vault)",
 	MsgErrUnresolvedRefs:     "unresolved kks:// references:\n%s",
 	MsgErrRefDetail:          "  line %d: %s -> kks://%s/%s",
+	MsgErrRefMalformed:       "  line %d: %s -> %s (malformed; write kks://group/key or kks://key without whitespace)",
 	MsgErrSecretNotFound:     "kks://%s/%s not found",
 	MsgErrGroupNotFound:      "group '%s' not found",
 	MsgErrEnvFileNotFound:    ".env file not found: %s",
@@ -19,6 +20,7 @@ var catalogEN = messages{
 	MsgErrAgentConnFailed:    "cannot connect to agent",
 	MsgErrUnknownCommand:     "unknown command '%s'",
 	MsgErrVaultNotFound:      "vault not found. run 'kakusu init' first",
+	MsgErrInvalidExportNames: "cannot export names that are not shell variable names (use only ASCII letters, digits, and _, not starting with a digit): %s",
 
 	// Usage
 	MsgUsageSet:    "usage: kakusu set <group/key> [value]",
