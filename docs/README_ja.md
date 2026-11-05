@@ -111,7 +111,7 @@ kakusu run -- python app.py
 | `kakusu agent status` | エージェントの状態を表示 |
 | `kakusu agent stop`   | エージェントを停止    |
 
-マスターパスワードを入力すると、エージェントが鍵をメモリ上にキャッシュします。`list`・`set`・`delete`・`run` はキャッシュした鍵を使い、パスワードを再度求めません。`get`・`show`・`export`・`passwd` はキャッシュを使わず、毎回マスターパスワードを求めます。
+マスターパスワードを入力すると、エージェントが鍵をメモリ上にキャッシュします。`list`・`set`・`delete`・`run` はキャッシュした鍵を使い、パスワードを再度求めません。`get`・`show`・`export`・`passwd` はキャッシュを使わず、毎回マスターパスワードを求めます。コマンドがマスターパスワードを求めるとき、プロンプトにはコマンドが行う操作と、対象があればその対象が表示されます（`list` と `passwd` には対象がありません）。新しいマスターパスワードを設定するときのプロンプトは `新しいマスターパスワード: ` です。macOS と Linux では、stderr をリダイレクトしていてもパスワードのプロンプトは端末に表示されます。正しいパスワードを入力すると、上記のとおり鍵がキャッシュされます。
 
 キャッシュの有効期間（`KAKUSU_TTL`）は使うたびに延長されますが、どれだけ使っていても最後にパスワードを入力してから 8 時間で終わります。
 
@@ -129,7 +129,7 @@ DB_PASSWORD=kks://myproject/db_password
 OPENAI_API_KEY=kks://shared/openai_key
 ```
 
-`kakusu run` または `kakusu export` を使うと、`kks://group/key` が実際の値に置換されます。
+`kakusu run` または `kakusu export` を使うと、`kks://group/key` が実際の値に置換されます。グループを省いた `kks://key` は `default` グループを指します。`kks://` で始まる値を解決できないと、`run` と `export` はエラーで終了します。
 
 ```bash
 # 直接実行
@@ -141,6 +141,8 @@ kakusu run --env .env.staging -- python app.py
 # シェルの環境変数に展開
 eval "$(kakusu export)"
 ```
+
+`kakusu export` が受け付ける名前は、POSIX シェルの変数名の規則（`[A-Za-z_][A-Za-z0-9_]*`）に合うものだけです。`.env` ファイルの名前、または `kakusu export <group>`・`kakusu export <group/key>` が出力するキーに規則に合わないものが1つでもあると、何も出力せず、その名前を挙げたエラーで終了します。`export FOO=bar` と書いた行も、名前が `export FOO` になるためエラーになります。`FOO=bar` と書いてください。export が保証するのは `.env` ファイルが出力する文の構造を変えられないことだけで、`PS1`・`PROMPT_COMMAND`・`PATH` のような規則に合う名前でも後でシェルにコードを実行させられるため、他人から受け取った `.env` ファイルは、その export を `eval` する前に中身を確認してください。
 
 ## `run` と `export` の違い
 

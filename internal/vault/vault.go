@@ -65,7 +65,7 @@ func snapshotOf(raw []byte) Snapshot {
 // With useCache false it ignores the agent cache and always asks for the
 // password; a correct password is still cached.
 // Password prompters are injected to avoid a dependency on the UI layer.
-func LoadKakusu(password string, allowCreate, useCache bool, promptPw func(string) (string, error), promptNewPw func() (string, error)) (*State, error) {
+func LoadKakusu(password string, allowCreate, useCache bool, promptPw, promptNewPw func() (string, error)) (*State, error) {
 	path := config.KakusuFile()
 	noAgent := config.AgentDisabled()
 
@@ -85,7 +85,10 @@ func LoadKakusu(password string, allowCreate, useCache bool, promptPw func(strin
 		if _, err := io.ReadFull(rand.Reader, salt); err != nil {
 			return nil, err
 		}
-		key := crypto.DeriveKey(password, salt)
+		key, err := crypto.DeriveKey(password, salt)
+		if err != nil {
+			return nil, err
+		}
 		if !noAgent {
 			if err := agent.EnsureAgent(); err == nil {
 				agent.SetKey(key, salt)
@@ -133,13 +136,16 @@ func LoadKakusu(password string, allowCreate, useCache bool, promptPw func(strin
 
 	// Prompt for password.
 	if password == "" {
-		password, err = promptPw(i18n.Msg(i18n.MsgPromptMasterPassword))
+		password, err = promptPw()
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	key := crypto.DeriveKey(password, salt)
+	key, err := crypto.DeriveKey(password, salt)
+	if err != nil {
+		return nil, err
+	}
 	plaintext, err := crypto.DecryptData(blob, key)
 	if err != nil {
 		return nil, errors.New(i18n.Msg(i18n.MsgErrPasswordWrong))

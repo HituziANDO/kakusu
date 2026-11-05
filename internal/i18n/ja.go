@@ -10,6 +10,7 @@ var catalogJA = messages{
 	MsgErrPasswordWrong:      "パスワードが違います（または kakusu が破損しています）",
 	MsgErrUnresolvedRefs:     "以下の kks:// 参照が解決できませんでした:\n%s",
 	MsgErrRefDetail:          "  line %d: %s → kks://%s/%s",
+	MsgErrRefMalformed:       "  line %d: %s → %s（形式が不正です。空白を含めず kks://group/key か kks://key と書いてください）",
 	MsgErrSecretNotFound:     "kks://%s/%s は存在しません",
 	MsgErrGroupNotFound:      "グループ '%s' は存在しません",
 	MsgErrEnvFileNotFound:    ".env ファイルが見つかりません: %s",
@@ -20,6 +21,7 @@ var catalogJA = messages{
 	MsgErrUnknownCommand:     "不明なコマンド '%s'",
 	MsgErrVaultNotFound:      "Kakusu が見つかりません。先に 'kakusu init' を実行してください",
 	MsgErrVaultChanged:       "読み込んだ後に Kakusu のファイルが変更されました（同期サービスや別のデバイスなど）。何も保存していません。もう一度コマンドを実行してください",
+	MsgErrInvalidExportNames: "シェルの変数名として使えない名前は export できません（半角英数字と _ のみ、先頭は数字以外）: %s",
 
 	// 使い方
 	MsgUsageSet:    "使い方: kakusu set <group/key> [value]",
@@ -30,15 +32,24 @@ var catalogJA = messages{
 	MsgUsageAgent:  "使い方: kakusu agent <stop|status>",
 	MsgUsageHint:   "  kakusu help  でコマンド一覧を確認してください",
 
-	// プロンプト
-	MsgPromptMasterPassword: "マスターパスワード: ",
-	MsgPromptNewPassword:    "新しいマスターパスワード: ",
-	MsgPromptConfirm:        "もう一度入力: ",
-	MsgPromptMinLength:      "8文字以上にしてください",
-	MsgPromptMismatch:       "一致しませんでした。再入力してください。",
-	MsgPromptOverwrite:      "既存のKakusuが存在します。上書きしますか？ [y/N]: ",
-	MsgPromptSecretValue:    "%s/%s の値: ",
-	MsgPromptDeleteConfirm:  "kks://%s/%s を削除しますか？ [y/N]: ",
+	// プロンプト。ui.PromptPassword で読むプロンプトは対象を %q で受け取り、
+	// 名前やパスに含まれる制御文字を端末へ送らずエスケープして表示する。
+	MsgPromptPasswordToPrint:      "%q の値を出力します。マスターパスワード: ",
+	MsgPromptPasswordToPrintGroup: "グループ %q のすべての値を出力します。マスターパスワード: ",
+	MsgPromptPasswordToPrintEnv:   "%q が参照する値を出力します。マスターパスワード: ",
+	MsgPromptPasswordToList:       "キー一覧を表示します。マスターパスワード: ",
+	MsgPromptPasswordToStore:      "%q を保存します。マスターパスワード: ",
+	MsgPromptPasswordToDelete:     "%q を削除します。マスターパスワード: ",
+	// 1 番目の引数は、要素ごとにクォート済みのコマンドライン。
+	MsgPromptPasswordToRun:   "%[2]q が参照する値を渡して %[1]s を実行します。マスターパスワード: ",
+	MsgPromptCurrentPassword: "現在のマスターパスワード: ",
+	MsgPromptNewPassword:     "新しいマスターパスワード: ",
+	MsgPromptConfirm:         "もう一度入力: ",
+	MsgPromptMinLength:       "8文字以上にしてください",
+	MsgPromptMismatch:        "一致しませんでした。再入力してください。",
+	MsgPromptOverwrite:       "既存のKakusuが存在します。上書きしますか？ [y/N]: ",
+	MsgPromptSecretValue:     "%q の値: ",
+	MsgPromptDeleteConfirm:   "kks://%s/%s を削除しますか？ [y/N]: ",
 
 	// ステータス
 	MsgCancelled:       "キャンセルしました",

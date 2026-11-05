@@ -10,6 +10,7 @@ var catalogEN = messages{
 	MsgErrPasswordWrong:      "wrong password (or corrupted vault)",
 	MsgErrUnresolvedRefs:     "unresolved kks:// references:\n%s",
 	MsgErrRefDetail:          "  line %d: %s -> kks://%s/%s",
+	MsgErrRefMalformed:       "  line %d: %s -> %s (malformed; write kks://group/key or kks://key without whitespace)",
 	MsgErrSecretNotFound:     "kks://%s/%s not found",
 	MsgErrGroupNotFound:      "group '%s' not found",
 	MsgErrEnvFileNotFound:    ".env file not found: %s",
@@ -20,6 +21,7 @@ var catalogEN = messages{
 	MsgErrUnknownCommand:     "unknown command '%s'",
 	MsgErrVaultNotFound:      "vault not found. run 'kakusu init' first",
 	MsgErrVaultChanged:       "the vault file changed after it was loaded (for example, by a sync service or on another device). nothing was saved. run the command again",
+	MsgErrInvalidExportNames: "cannot export names that are not shell variable names (use only ASCII letters, digits, and _, not starting with a digit): %s",
 
 	// Usage
 	MsgUsageSet:    "usage: kakusu set <group/key> [value]",
@@ -30,15 +32,25 @@ var catalogEN = messages{
 	MsgUsageAgent:  "usage: kakusu agent <stop|status>",
 	MsgUsageHint:   "  run 'kakusu help' for a list of commands",
 
-	// Prompts
-	MsgPromptMasterPassword: "Master password: ",
-	MsgPromptNewPassword:    "New master password: ",
-	MsgPromptConfirm:        "Confirm: ",
-	MsgPromptMinLength:      "must be at least 8 characters",
-	MsgPromptMismatch:       "passwords do not match. please try again.",
-	MsgPromptOverwrite:      "Existing vault found. Overwrite? [y/N]: ",
-	MsgPromptSecretValue:    "%s/%s value: ",
-	MsgPromptDeleteConfirm:  "Delete kks://%s/%s? [y/N]: ",
+	// Prompts. The ones read by ui.PromptPassword take their targets as %q, so
+	// that control characters in a name or path are shown escaped rather than
+	// sent to the terminal.
+	MsgPromptPasswordToPrint:      "To print the value of %q, enter the master password: ",
+	MsgPromptPasswordToPrintGroup: "To print every value in group %q, enter the master password: ",
+	MsgPromptPasswordToPrintEnv:   "To print the values that %q refers to, enter the master password: ",
+	MsgPromptPasswordToList:       "To list keys, enter the master password: ",
+	MsgPromptPasswordToStore:      "To store %q, enter the master password: ",
+	MsgPromptPasswordToDelete:     "To delete %q, enter the master password: ",
+	// The first argument is the command line with each element already quoted.
+	MsgPromptPasswordToRun:   "To run %s with the values that %q refers to, enter the master password: ",
+	MsgPromptCurrentPassword: "Current master password: ",
+	MsgPromptNewPassword:     "New master password: ",
+	MsgPromptConfirm:         "Confirm: ",
+	MsgPromptMinLength:       "must be at least 8 characters",
+	MsgPromptMismatch:        "passwords do not match. please try again.",
+	MsgPromptOverwrite:       "Existing vault found. Overwrite? [y/N]: ",
+	MsgPromptSecretValue:     "%q value: ",
+	MsgPromptDeleteConfirm:   "Delete kks://%s/%s? [y/N]: ",
 
 	// Status
 	MsgCancelled:       "cancelled",

@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -58,9 +60,11 @@ func init() {
 	)
 }
 
-// loadVault is a convenience wrapper that exits on error.
-func loadVault(allowCreate bool) *vault.State {
-	s, err := vault.LoadKakusu("", allowCreate, true, ui.PromptPassword, ui.PromptNewPassword)
+// loadVault is a convenience wrapper that exits on error. prompt is shown when
+// the master password is needed.
+func loadVault(allowCreate bool, prompt string) *vault.State {
+	askPw := func() (string, error) { return ui.PromptPassword(prompt) }
+	s, err := vault.LoadKakusu("", allowCreate, true, askPw, ui.PromptNewPassword)
 	if err != nil {
 		ui.Die(err.Error())
 	}
@@ -71,8 +75,9 @@ func loadVault(allowCreate bool) *vault.State {
 // print values or change the password use it, so that, while the key is cached,
 // these commands print no value and change no password unless the user types
 // the password.
-func loadVaultAskingPassword() *vault.State {
-	s, err := vault.LoadKakusu("", false, false, ui.PromptPassword, ui.PromptNewPassword)
+func loadVaultAskingPassword(prompt string) *vault.State {
+	askPw := func() (string, error) { return ui.PromptPassword(prompt) }
+	s, err := vault.LoadKakusu("", false, false, askPw, ui.PromptNewPassword)
 	if err != nil {
 		ui.Die(err.Error())
 	}
@@ -122,6 +127,20 @@ func lockVault(allowCreate bool) {
 	vaultLock = f
 }
 
+// envFileForPrompt returns the env file path to show in the password prompt:
+// absolute, but not cleaned, so that it names the file that is opened. Cleaning
+// "link/../x.env" to "x.env" would name another file when link is a symlink.
+func envFileForPrompt(envFile string) string {
+	if filepath.IsAbs(envFile) {
+		return envFile
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		ui.Die(err.Error())
+	}
+	return wd + string(filepath.Separator) + envFile
+}
+
 // ---------------------------------------------------------------------------
 // init
 // ---------------------------------------------------------------------------
@@ -150,7 +169,10 @@ var initCmd = &cobra.Command{
 		if _, err := io.ReadFull(rand.Reader, salt); err != nil {
 			ui.Die(err.Error())
 		}
-		key := crypto.DeriveKey(pw, salt)
+		key, err := crypto.DeriveKey(pw, salt)
+		if err != nil {
+			ui.Die(err.Error())
+		}
 		s := &vault.State{Data: make(vault.Data), Key: key, Salt: salt, Loaded: loaded}
 		if err := s.Save(); err != nil {
 			ui.Die(err.Error())
@@ -182,14 +204,14 @@ var setCmd = &cobra.Command{
 			value = strings.Join(args[1:], " ")
 		} else {
 			var err error
-			value, err = ui.PromptPassword(i18n.Msgf(i18n.MsgPromptSecretValue, group, key))
+			value, err = ui.PromptPassword(i18n.Msgf(i18n.MsgPromptSecretValue, group+"/"+key))
 			if err != nil {
 				ui.Die(err.Error())
 			}
 		}
 
 		lockVault(true)
-		s := loadVault(true)
+		s := loadVault(true, i18n.Msgf(i18n.MsgPromptPasswordToStore, group+"/"+key))
 		vault.SetSecret(s.Data, group, key, value)
 		if err := s.Save(); err != nil {
 			ui.Die(err.Error())
@@ -210,7 +232,7 @@ var getCmd = &cobra.Command{
 			ui.Die(i18n.Msg(i18n.MsgUsageGet))
 		}
 		group, key := vault.ParseRef(args[0])
-		s := loadVaultAskingPassword()
+		s := loadVaultAskingPassword(i18n.Msgf(i18n.MsgPromptPasswordToPrint, group+"/"+key))
 		v, ok := vault.GetSecret(s.Data, group, key)
 		if !ok {
 			ui.Die(i18n.Msgf(i18n.MsgErrSecretNotFound, group, key))
@@ -231,7 +253,7 @@ var showCmd = &cobra.Command{
 			ui.Die(i18n.Msg(i18n.MsgUsageShow))
 		}
 		group, key := vault.ParseRef(args[0])
-		s := loadVaultAskingPassword()
+		s := loadVaultAskingPassword(i18n.Msgf(i18n.MsgPromptPasswordToPrint, group+"/"+key))
 		v, ok := vault.GetSecret(s.Data, group, key)
 		if !ok {
 			ui.Die(i18n.Msgf(i18n.MsgErrSecretNotFound, group, key))
@@ -248,7 +270,7 @@ var listCmd = &cobra.Command{
 	Use:   "list [group]",
 	Short: "List secrets (values masked)",
 	Run: func(cmd *cobra.Command, args []string) {
-		s := loadVault(false)
+		s := loadVault(false, i18n.Msg(i18n.MsgPromptPasswordToList))
 		if len(s.Data) == 0 {
 			fmt.Fprintln(os.Stderr, i18n.Msg(i18n.MsgNoSecrets))
 			return
@@ -304,7 +326,7 @@ var deleteCmd = &cobra.Command{
 		}
 		group, key := vault.ParseRef(args[0])
 		lockVault(false)
-		s := loadVault(false)
+		s := loadVault(false, i18n.Msgf(i18n.MsgPromptPasswordToDelete, group+"/"+key))
 		if _, ok := vault.GetSecret(s.Data, group, key); !ok {
 			ui.Die(i18n.Msgf(i18n.MsgErrSecretNotFound, group, key))
 		}
@@ -337,7 +359,11 @@ var runCmd = &cobra.Command{
 			ui.Die(i18n.Msgf(i18n.MsgErrEnvFileNotFound, envFile))
 		}
 
-		s := loadVault(false)
+		quoted := make([]string, len(args))
+		for i, a := range args {
+			quoted[i] = strconv.Quote(a)
+		}
+		s := loadVault(false, i18n.Msgf(i18n.MsgPromptPasswordToRun, strings.Join(quoted, " "), envFileForPrompt(envFile)))
 		injected, err := vault.ResolveDotenv(envFile, s.Data)
 		if err != nil {
 			ui.Die(err.Error())
@@ -375,12 +401,12 @@ var exportCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		// If a group or group/key argument is given, export directly from vault.
 		if len(args) > 0 {
-			s := loadVaultAskingPassword()
 			result := make(map[string]string)
 
 			if strings.Contains(args[0], "/") {
 				// group/key form — export a single secret.
 				group, key := vault.ParseRef(args[0])
+				s := loadVaultAskingPassword(i18n.Msgf(i18n.MsgPromptPasswordToPrint, group+"/"+key))
 				v, ok := vault.GetSecret(s.Data, group, key)
 				if !ok {
 					ui.Die(i18n.Msgf(i18n.MsgErrSecretNotFound, group, key))
@@ -389,6 +415,7 @@ var exportCmd = &cobra.Command{
 			} else {
 				// group only — export all keys in the group.
 				group := args[0]
+				s := loadVaultAskingPassword(i18n.Msgf(i18n.MsgPromptPasswordToPrintGroup, group))
 				g, ok := s.Data[group]
 				if !ok {
 					ui.Die(i18n.Msgf(i18n.MsgErrGroupNotFound, group))
@@ -416,7 +443,7 @@ var exportCmd = &cobra.Command{
 			return
 		}
 
-		s := loadVaultAskingPassword()
+		s := loadVaultAskingPassword(i18n.Msgf(i18n.MsgPromptPasswordToPrintEnv, envFileForPrompt(envFile)))
 		injected, err := vault.ResolveDotenv(envFile, s.Data)
 		if err != nil {
 			ui.Die(err.Error())
@@ -426,12 +453,28 @@ var exportCmd = &cobra.Command{
 	},
 }
 
+// exportNameRe matches a POSIX shell variable name. printExports writes names
+// into shell statements unquoted, so any other character could end the
+// statement and start another one.
+var exportNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// printExports prints nothing unless every name matches exportNameRe.
 func printExports(m map[string]string) {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
+	var invalid []string
+	for _, k := range keys {
+		if !exportNameRe.MatchString(k) {
+			// Quoted: a name can hold newlines and terminal escape sequences.
+			invalid = append(invalid, strconv.Quote(k))
+		}
+	}
+	if len(invalid) > 0 {
+		ui.Die(i18n.Msgf(i18n.MsgErrInvalidExportNames, strings.Join(invalid, ", ")))
+	}
 	for _, k := range keys {
 		v := strings.ReplaceAll(m[k], "'", "'\"'\"'")
 		fmt.Printf("export %s='%s'\n", k, v)
@@ -447,7 +490,7 @@ var passwdCmd = &cobra.Command{
 	Short: "Change master password",
 	Run: func(cmd *cobra.Command, args []string) {
 		lockVault(false)
-		s := loadVaultAskingPassword()
+		s := loadVaultAskingPassword(i18n.Msg(i18n.MsgPromptCurrentPassword))
 		newPw, err := ui.PromptNewPassword()
 		if err != nil {
 			ui.Die(err.Error())
@@ -456,7 +499,10 @@ var passwdCmd = &cobra.Command{
 		if _, err := io.ReadFull(rand.Reader, newSalt); err != nil {
 			ui.Die(err.Error())
 		}
-		s.Key = crypto.DeriveKey(newPw, newSalt)
+		s.Key, err = crypto.DeriveKey(newPw, newSalt)
+		if err != nil {
+			ui.Die(err.Error())
+		}
 		s.Salt = newSalt
 		if err := s.Save(); err != nil {
 			ui.Die(err.Error())

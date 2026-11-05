@@ -17,6 +17,7 @@ const (
 	MsgErrPasswordWrong      = "err.password_wrong"
 	MsgErrUnresolvedRefs     = "err.unresolved_refs"
 	MsgErrRefDetail          = "err.ref_detail"
+	MsgErrRefMalformed       = "err.ref_malformed"
 	MsgErrSecretNotFound     = "err.secret_not_found"
 	MsgErrGroupNotFound      = "err.group_not_found"
 	MsgErrEnvFileNotFound    = "err.env_file_not_found"
@@ -27,6 +28,7 @@ const (
 	MsgErrUnknownCommand     = "err.unknown_command"
 	MsgErrVaultNotFound      = "err.vault_not_found"
 	MsgErrVaultChanged       = "err.vault_changed"
+	MsgErrInvalidExportNames = "err.invalid_export_names"
 
 	// Usage
 	MsgUsageSet    = "usage.set"
@@ -38,14 +40,21 @@ const (
 	MsgUsageHint   = "usage.hint"
 
 	// Prompts
-	MsgPromptMasterPassword = "prompt.master_password"
-	MsgPromptNewPassword    = "prompt.new_password"
-	MsgPromptConfirm        = "prompt.confirm_password"
-	MsgPromptMinLength      = "prompt.min_length"
-	MsgPromptMismatch       = "prompt.mismatch"
-	MsgPromptOverwrite      = "prompt.overwrite"
-	MsgPromptSecretValue    = "prompt.secret_value"
-	MsgPromptDeleteConfirm  = "prompt.delete_confirm"
+	MsgPromptPasswordToPrint      = "prompt.password_to_print"
+	MsgPromptPasswordToPrintGroup = "prompt.password_to_print_group"
+	MsgPromptPasswordToPrintEnv   = "prompt.password_to_print_env"
+	MsgPromptPasswordToList       = "prompt.password_to_list"
+	MsgPromptPasswordToStore      = "prompt.password_to_store"
+	MsgPromptPasswordToDelete     = "prompt.password_to_delete"
+	MsgPromptPasswordToRun        = "prompt.password_to_run"
+	MsgPromptCurrentPassword      = "prompt.current_password"
+	MsgPromptNewPassword          = "prompt.new_password"
+	MsgPromptConfirm              = "prompt.confirm_password"
+	MsgPromptMinLength            = "prompt.min_length"
+	MsgPromptMismatch             = "prompt.mismatch"
+	MsgPromptOverwrite            = "prompt.overwrite"
+	MsgPromptSecretValue          = "prompt.secret_value"
+	MsgPromptDeleteConfirm        = "prompt.delete_confirm"
 
 	// Status
 	MsgCancelled       = "status.cancelled"
