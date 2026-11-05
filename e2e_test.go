@@ -253,6 +253,35 @@ func TestPasswdChangesPasswordWithCurrentPassword(t *testing.T) {
 	}
 }
 
+// internal/crypto/testdata/secrets-v0.5.0.enc was written by kakusu v0.5.0;
+// internal/crypto/crypto_test.go says how. Reading it from the vault path
+// checks that the vault still splits the file as salt ‖ nonce ‖ ciphertext,
+// as released versions wrote it.
+func TestGetReadsVaultWrittenByV050(t *testing.T) {
+	home, err := os.MkdirTemp("", "kk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(home) })
+	fixture, err := os.ReadFile(filepath.Join("internal", "crypto", "testdata", "secrets-v0.5.0.enc"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(home, ".kakusu")
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "secrets.enc"), fixture, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// With the agent disabled, get starts no agent that would need stopping.
+	r := mustSucceed(t, kakusu(t, home, []string{"KAKUSU_NO_AGENT=1"}, []string{"golden-fixture-pw"}, "get", "app/db_password"))
+	if want := "dummy-db-pass\n"; r.stdout != want {
+		t.Errorf("stdout %q; want %q", r.stdout, want)
+	}
+}
+
 func TestRunUsesCache(t *testing.T) {
 	home := newVault(t)
 	envFile := writeEnvFile(t, home)
