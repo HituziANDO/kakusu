@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -379,12 +380,28 @@ var exportCmd = &cobra.Command{
 	},
 }
 
+// exportNameRe matches a POSIX shell variable name. printExports writes names
+// into shell statements unquoted, so any other character could end the
+// statement and start another one.
+var exportNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// printExports prints nothing unless every name matches exportNameRe.
 func printExports(m map[string]string) {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
+	var invalid []string
+	for _, k := range keys {
+		if !exportNameRe.MatchString(k) {
+			// Quoted: a name can hold newlines and terminal escape sequences.
+			invalid = append(invalid, strconv.Quote(k))
+		}
+	}
+	if len(invalid) > 0 {
+		ui.Die(i18n.Msgf(i18n.MsgErrInvalidExportNames, strings.Join(invalid, ", ")))
+	}
 	for _, k := range keys {
 		v := strings.ReplaceAll(m[k], "'", "'\"'\"'")
 		fmt.Printf("export %s='%s'\n", k, v)

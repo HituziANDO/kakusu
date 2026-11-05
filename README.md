@@ -142,6 +142,8 @@ kakusu run --env .env.staging -- python app.py
 eval "$(kakusu export)"
 ```
 
+`kakusu export` accepts only names that follow the POSIX shell variable name rule (`[A-Za-z_][A-Za-z0-9_]*`). If any name in the `.env` file, or any key that `kakusu export <group>` or `kakusu export <group/key>` would print, breaks the rule, it prints nothing and fails with an error that lists those names. A line written as `export FOO=bar` fails too, because its name is `export FOO`; write `FOO=bar` instead. This guarantees only that the `.env` file cannot change the structure of the printed statements: a valid name such as `PS1`, `PROMPT_COMMAND`, or `PATH` can still make your shell run code later, so review a `.env` file from someone else before you `eval` its export.
+
 ## `run` vs `export`
 
 |         | `kakusu run`                        | `kakusu export`                              |

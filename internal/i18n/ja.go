@@ -20,6 +20,7 @@ var catalogJA = messages{
 	MsgErrAgentConnFailed:    "エージェントに接続できません",
 	MsgErrUnknownCommand:     "不明なコマンド '%s'",
 	MsgErrVaultNotFound:      "Kakusu が見つかりません。先に 'kakusu init' を実行してください",
+	MsgErrInvalidExportNames: "シェルの変数名として使えない名前は export できません（半角英数字と _ のみ、先頭は数字以外）: %s",
 
 	// 使い方
 	MsgUsageSet:    "使い方: kakusu set <group/key> [value]",
