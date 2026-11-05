@@ -10,6 +10,7 @@ var catalogJA = messages{
 	MsgErrPasswordWrong:      "パスワードが違います（または kakusu が破損しています）",
 	MsgErrUnresolvedRefs:     "以下の kks:// 参照が解決できませんでした:\n%s",
 	MsgErrRefDetail:          "  line %d: %s → kks://%s/%s",
+	MsgErrRefMalformed:       "  line %d: %s → %s（形式が不正です。空白を含めず kks://group/key か kks://key と書いてください）",
 	MsgErrSecretNotFound:     "kks://%s/%s は存在しません",
 	MsgErrGroupNotFound:      "グループ '%s' は存在しません",
 	MsgErrEnvFileNotFound:    ".env ファイルが見つかりません: %s",
