@@ -30,7 +30,7 @@ type State struct {
 // With useCache false it ignores the agent cache and always asks for the
 // password; a correct password is still cached.
 // Password prompters are injected to avoid a dependency on the UI layer.
-func LoadKakusu(password string, allowCreate, useCache bool, promptPw func(string) (string, error), promptNewPw func() (string, error)) (*State, error) {
+func LoadKakusu(password string, allowCreate, useCache bool, promptPw, promptNewPw func() (string, error)) (*State, error) {
 	path := config.KakusuFile()
 	noAgent := config.AgentDisabled()
 
@@ -99,7 +99,7 @@ func LoadKakusu(password string, allowCreate, useCache bool, promptPw func(strin
 
 	// Prompt for password.
 	if password == "" {
-		password, err = promptPw(i18n.Msg(i18n.MsgPromptMasterPassword))
+		password, err = promptPw()
 		if err != nil {
 			return nil, err
 		}

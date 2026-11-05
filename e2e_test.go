@@ -5,8 +5,8 @@ package main
 // End-to-end tests: they build the real binary and run its subcommands under a
 // temporary HOME. Each child gets only the environment set here, so a
 // KAKUSU_FILE in the caller's shell never points it at a real vault, and runs
-// in a new session, so it has no controlling terminal and reads passwords from
-// stdin.
+// in a new session, so it has no controlling terminal, reads passwords from
+// stdin, and prints the password prompts to stderr.
 
 import (
 	"bytes"
@@ -196,8 +196,173 @@ func TestValueCommandsAskForPasswordWhileCached(t *testing.T) {
 			if r.code == 0 || r.stdout != "" {
 				t.Errorf("exit %d, stdout %q; want non-zero exit and empty stdout", r.code, r.stdout)
 			}
-			if !strings.Contains(r.stderr, "Master password: ") {
+			if !strings.Contains(r.stderr, "enter the master password: ") {
 				t.Errorf("stderr %q; want the master password prompt", r.stderr)
+			}
+		})
+	}
+}
+
+// promptBeforeError returns what a command printed to stderr before the error
+// it died with. With stdin /dev/null, a command that asks for the password
+// dies at the prompt, so that is the whole prompt.
+func promptBeforeError(stderr string) string {
+	prompt, _, _ := strings.Cut(stderr, "Error: ")
+	return prompt
+}
+
+func TestPasswordPromptNamesActionAndTarget(t *testing.T) {
+	home := newVault(t)
+	writeEnvFile(t, home)
+	// The commands get --env x.env relative to home and show it as the
+	// absolute path, which the child builds on its resolved working directory.
+	realHome, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	envAbs := filepath.Join(realHome, "x.env")
+	// get, show, export, and passwd always ask; the others ask only without the cache.
+	noAgent := []string{"KAKUSU_NO_AGENT=1"}
+	for _, tc := range []struct {
+		name   string
+		env    []string
+		args   []string
+		en, ja string
+	}{
+		{"get", nil, []string{"get", "app/db_password"},
+			`To print the value of "app/db_password", enter the master password: `,
+			`"app/db_password" の値を出力します。マスターパスワード: `},
+		{"get_default_group", nil, []string{"get", "foo"},
+			`To print the value of "default/foo", enter the master password: `,
+			`"default/foo" の値を出力します。マスターパスワード: `},
+		{"show", nil, []string{"show", "app/db_password"},
+			`To print the value of "app/db_password", enter the master password: `,
+			`"app/db_password" の値を出力します。マスターパスワード: `},
+		{"export_key", nil, []string{"export", "app/db_password"},
+			`To print the value of "app/db_password", enter the master password: `,
+			`"app/db_password" の値を出力します。マスターパスワード: `},
+		{"export_group", nil, []string{"export", "app"},
+			`To print every value in group "app", enter the master password: `,
+			`グループ "app" のすべての値を出力します。マスターパスワード: `},
+		{"export_env", nil, []string{"export", "--env", "x.env"},
+			`To print the values that "` + envAbs + `" refers to, enter the master password: `,
+			`"` + envAbs + `" が参照する値を出力します。マスターパスワード: `},
+		{"passwd", nil, []string{"passwd"},
+			`Current master password: `,
+			`現在のマスターパスワード: `},
+		{"list", noAgent, []string{"list"},
+			`To list keys, enter the master password: `,
+			`キー一覧を表示します。マスターパスワード: `},
+		{"set", noAgent, []string{"set", "app/api_key", "NEWVALUE"},
+			`To store "app/api_key", enter the master password: `,
+			`"app/api_key" を保存します。マスターパスワード: `},
+		{"delete", noAgent, []string{"delete", "app/api_key"},
+			`To delete "app/api_key", enter the master password: `,
+			`"app/api_key" を削除します。マスターパスワード: `},
+		{"run", noAgent, []string{"run", "--env", "x.env", "--", "printenv", "X"},
+			`To run "printenv" "X" with the values that "` + envAbs + `" refers to, enter the master password: `,
+			`"` + envAbs + `" が参照する値を渡して "printenv" "X" を実行します。マスターパスワード: `},
+	} {
+		for _, lang := range []struct{ code, want string }{{"en", tc.en}, {"ja", tc.ja}} {
+			t.Run(tc.name+"_"+lang.code, func(t *testing.T) {
+				r := kakusu(t, home, append([]string{"KAKUSU_LANG=" + lang.code}, tc.env...), nil, tc.args...)
+				if got := promptBeforeError(r.stderr); got != lang.want {
+					t.Errorf("prompt %q; want %q (exit %d)", got, lang.want, r.code)
+				}
+			})
+		}
+	}
+}
+
+func TestPasswordPromptEscapesTarget(t *testing.T) {
+	home := newVault(t)
+	envName := "x\n\x1b[31m.env"
+	if err := os.WriteFile(filepath.Join(home, envName), []byte("X=kks://app/db_password\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	realHome, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := "evil\x1b[2J/k\ney"
+	noAgent := []string{"KAKUSU_NO_AGENT=1"}
+	for _, tc := range []struct {
+		name   string
+		env    []string
+		args   []string
+		en, ja string
+	}{
+		{"get", nil, []string{"get", ref},
+			`To print the value of "evil\x1b[2J/k\ney", enter the master password: `,
+			`"evil\x1b[2J/k\ney" の値を出力します。マスターパスワード: `},
+		{"export_group", nil, []string{"export", "g\x1b[2J\nx"},
+			`To print every value in group "g\x1b[2J\nx", enter the master password: `,
+			`グループ "g\x1b[2J\nx" のすべての値を出力します。マスターパスワード: `},
+		{"export_env", nil, []string{"export", "--env", envName},
+			`To print the values that "` + realHome + `/x\n\x1b[31m.env" refers to, enter the master password: `,
+			`"` + realHome + `/x\n\x1b[31m.env" が参照する値を出力します。マスターパスワード: `},
+		// A raw target here would erase the line and paint a fake master
+		// password prompt in front of the hidden value input.
+		{"set_value", nil, []string{"set", "g/k\r\x1b[2KTo list keys, enter the master password: \x1b]0;"},
+			`"g/k\r\x1b[2KTo list keys, enter the master password: \x1b]0;" value: `,
+			`"g/k\r\x1b[2KTo list keys, enter the master password: \x1b]0;" の値: `},
+		{"set", noAgent, []string{"set", ref, "V"},
+			`To store "evil\x1b[2J/k\ney", enter the master password: `,
+			`"evil\x1b[2J/k\ney" を保存します。マスターパスワード: `},
+		{"delete", noAgent, []string{"delete", ref},
+			`To delete "evil\x1b[2J/k\ney", enter the master password: `,
+			`"evil\x1b[2J/k\ney" を削除します。マスターパスワード: `},
+		{"run", noAgent, []string{"run", "--env", envName, "--", "printenv", "X\x1b[31m\n"},
+			`To run "printenv" "X\x1b[31m\n" with the values that "` + realHome + `/x\n\x1b[31m.env" refers to, enter the master password: `,
+			`"` + realHome + `/x\n\x1b[31m.env" が参照する値を渡して "printenv" "X\x1b[31m\n" を実行します。マスターパスワード: `},
+	} {
+		for _, lang := range []struct{ code, want string }{{"en", tc.en}, {"ja", tc.ja}} {
+			t.Run(tc.name+"_"+lang.code, func(t *testing.T) {
+				r := kakusu(t, home, append([]string{"KAKUSU_LANG=" + lang.code}, tc.env...), nil, tc.args...)
+				if strings.Contains(r.stderr, "\x1b") {
+					t.Errorf("stderr %q contains a raw ESC", r.stderr)
+				}
+				if got := promptBeforeError(r.stderr); got != lang.want {
+					t.Errorf("prompt %q; want %q (exit %d)", got, lang.want, r.code)
+				}
+			})
+		}
+	}
+}
+
+// link is a symlink to real/sub, so link/../x.env opens real/x.env. Cleaning
+// the path to x.env would name another file, which does not exist here.
+func TestPasswordPromptShowsEnvFileAsOpened(t *testing.T) {
+	home := newVault(t)
+	if err := os.MkdirAll(filepath.Join(home, "real", "sub"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "real", "x.env"), []byte("X=kks://app/db_password\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("real", "sub"), filepath.Join(home, "link")); err != nil {
+		t.Fatal(err)
+	}
+	realHome, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shown := `"` + realHome + `/link/../x.env"`
+	for _, tc := range []struct {
+		name string
+		env  []string
+		args []string
+		want string
+	}{
+		{"export", nil, []string{"export", "--env", "link/../x.env"},
+			`To print the values that ` + shown + ` refers to, enter the master password: `},
+		{"run", []string{"KAKUSU_NO_AGENT=1"}, []string{"run", "--env", "link/../x.env", "--", "printenv", "X"},
+			`To run "printenv" "X" with the values that ` + shown + ` refers to, enter the master password: `},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := kakusu(t, home, tc.env, nil, tc.args...)
+			if got := promptBeforeError(r.stderr); got != tc.want {
+				t.Errorf("prompt %q; want %q (exit %d)", got, tc.want, r.code)
 			}
 		})
 	}

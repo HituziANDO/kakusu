@@ -31,15 +31,24 @@ var catalogJA = messages{
 	MsgUsageAgent:  "使い方: kakusu agent <stop|status>",
 	MsgUsageHint:   "  kakusu help  でコマンド一覧を確認してください",
 
-	// プロンプト
-	MsgPromptMasterPassword: "マスターパスワード: ",
-	MsgPromptNewPassword:    "新しいマスターパスワード: ",
-	MsgPromptConfirm:        "もう一度入力: ",
-	MsgPromptMinLength:      "8文字以上にしてください",
-	MsgPromptMismatch:       "一致しませんでした。再入力してください。",
-	MsgPromptOverwrite:      "既存のKakusuが存在します。上書きしますか？ [y/N]: ",
-	MsgPromptSecretValue:    "%s/%s の値: ",
-	MsgPromptDeleteConfirm:  "kks://%s/%s を削除しますか？ [y/N]: ",
+	// プロンプト。ui.PromptPassword で読むプロンプトは対象を %q で受け取り、
+	// 名前やパスに含まれる制御文字を端末へ送らずエスケープして表示する。
+	MsgPromptPasswordToPrint:      "%q の値を出力します。マスターパスワード: ",
+	MsgPromptPasswordToPrintGroup: "グループ %q のすべての値を出力します。マスターパスワード: ",
+	MsgPromptPasswordToPrintEnv:   "%q が参照する値を出力します。マスターパスワード: ",
+	MsgPromptPasswordToList:       "キー一覧を表示します。マスターパスワード: ",
+	MsgPromptPasswordToStore:      "%q を保存します。マスターパスワード: ",
+	MsgPromptPasswordToDelete:     "%q を削除します。マスターパスワード: ",
+	// 1 番目の引数は、要素ごとにクォート済みのコマンドライン。
+	MsgPromptPasswordToRun:   "%[2]q が参照する値を渡して %[1]s を実行します。マスターパスワード: ",
+	MsgPromptCurrentPassword: "現在のマスターパスワード: ",
+	MsgPromptNewPassword:     "新しいマスターパスワード: ",
+	MsgPromptConfirm:         "もう一度入力: ",
+	MsgPromptMinLength:       "8文字以上にしてください",
+	MsgPromptMismatch:        "一致しませんでした。再入力してください。",
+	MsgPromptOverwrite:       "既存のKakusuが存在します。上書きしますか？ [y/N]: ",
+	MsgPromptSecretValue:     "%q の値: ",
+	MsgPromptDeleteConfirm:   "kks://%s/%s を削除しますか？ [y/N]: ",
 
 	// ステータス
 	MsgCancelled:       "キャンセルしました",
