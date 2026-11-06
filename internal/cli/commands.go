@@ -84,6 +84,49 @@ func loadVaultAskingPassword(prompt string) *vault.State {
 	return s
 }
 
+// vaultLock keeps the lock file open until the process exits. Without a
+// reference to it, the garbage collector could close it and release the lock.
+var vaultLock *os.File
+
+// lockVault makes the commands that change the vault run one at a time on this
+// device. It takes an exclusive lock on a file next to the vault, waiting while
+// another process holds it, and keeps it until the process exits. The vault
+// itself is not locked, because Save replaces it with a new file. The lock file
+// is never deleted: a process could then lock a new file while another still
+// held the old one. Call it once, before the command reads the vault.
+// With allowCreate false, it creates no directory, and a missing one means
+// that there is no vault.
+func lockVault(allowCreate bool) {
+	path := config.KakusuFile() + ".lock"
+	if allowCreate {
+		if err := os.MkdirAll(config.KakusuDir(), 0700); err != nil {
+			ui.Die(err.Error())
+		}
+	}
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0600)
+	if !allowCreate && os.IsNotExist(err) {
+		ui.Die(i18n.Msg(i18n.MsgErrVaultNotFound))
+	}
+	if err != nil {
+		ui.Die(err.Error())
+	}
+	locked, err := platform.TryLock(f)
+	if err != nil {
+		if !platform.LockUnsupported(err) {
+			ui.Die(fmt.Sprintf("%s: %v", path, err))
+		}
+		fmt.Fprintln(os.Stderr, i18n.Msgf(i18n.MsgLockUnsupported, path, err))
+	} else if !locked {
+		fmt.Fprintln(os.Stderr, i18n.Msgf(i18n.MsgWaitingForLock, path))
+		// Another process holds the lock, so this file can be locked: any
+		// error here is a real failure, not a filesystem without locks.
+		if err := platform.Lock(f); err != nil {
+			ui.Die(fmt.Sprintf("%s: %v", path, err))
+		}
+	}
+	vaultLock = f
+}
+
 // envFileForPrompt returns the env file path to show in the password prompt:
 // absolute, but not cleaned, so that it names the file that is opened. Cleaning
 // "link/../x.env" to "x.env" would name another file when link is a symlink.
@@ -106,8 +149,13 @@ var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize vault (set master password)",
 	Run: func(cmd *cobra.Command, args []string) {
+		lockVault(true)
 		path := config.KakusuFile()
-		if _, err := os.Stat(path); err == nil {
+		loaded, err := vault.ReadSnapshot()
+		if err != nil {
+			ui.Die(err.Error())
+		}
+		if loaded.Exists {
 			if !ui.Confirm(i18n.Msg(i18n.MsgPromptOverwrite)) {
 				fmt.Fprintln(os.Stderr, i18n.Msg(i18n.MsgCancelled))
 				return
@@ -125,7 +173,7 @@ var initCmd = &cobra.Command{
 		if err != nil {
 			ui.Die(err.Error())
 		}
-		s := &vault.State{Data: make(vault.Data), Key: key, Salt: salt}
+		s := &vault.State{Data: make(vault.Data), Key: key, Salt: salt, Loaded: loaded}
 		if err := s.Save(); err != nil {
 			ui.Die(err.Error())
 		}
@@ -162,6 +210,7 @@ var setCmd = &cobra.Command{
 			}
 		}
 
+		lockVault(true)
 		s := loadVault(true, i18n.Msgf(i18n.MsgPromptPasswordToStore, group+"/"+key))
 		vault.SetSecret(s.Data, group, key, value)
 		if err := s.Save(); err != nil {
@@ -276,6 +325,7 @@ var deleteCmd = &cobra.Command{
 			ui.Die(i18n.Msg(i18n.MsgUsageDelete))
 		}
 		group, key := vault.ParseRef(args[0])
+		lockVault(false)
 		s := loadVault(false, i18n.Msgf(i18n.MsgPromptPasswordToDelete, group+"/"+key))
 		if _, ok := vault.GetSecret(s.Data, group, key); !ok {
 			ui.Die(i18n.Msgf(i18n.MsgErrSecretNotFound, group, key))
@@ -439,6 +489,7 @@ var passwdCmd = &cobra.Command{
 	Use:   "passwd",
 	Short: "Change master password",
 	Run: func(cmd *cobra.Command, args []string) {
+		lockVault(false)
 		s := loadVaultAskingPassword(i18n.Msg(i18n.MsgPromptCurrentPassword))
 		newPw, err := ui.PromptNewPassword()
 		if err != nil {

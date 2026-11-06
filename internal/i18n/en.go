@@ -20,6 +20,7 @@ var catalogEN = messages{
 	MsgErrAgentConnFailed:    "cannot connect to agent",
 	MsgErrUnknownCommand:     "unknown command '%s'",
 	MsgErrVaultNotFound:      "vault not found. run 'kakusu init' first",
+	MsgErrVaultChanged:       "the vault file changed after it was loaded (for example, by a sync service or on another device). nothing was saved. run the command again",
 	MsgErrInvalidExportNames: "cannot export names that are not shell variable names (use only ASCII letters, digits, and _, not starting with a digit): %s",
 
 	// Usage
@@ -65,6 +66,8 @@ var catalogEN = messages{
 	MsgKeyCachePresent: "Key cache: active (%s remaining)",
 	MsgKeyCacheNone:    "Key cache: none",
 	MsgKeyCacheCleared: "key cache cleared",
+	MsgWaitingForLock:  "waiting for another kakusu command to release %s",
+	MsgLockUnsupported: "warning: cannot lock %s (%v). continuing without the lock",
 
 	// Help (full text)
 	MsgHelp: `

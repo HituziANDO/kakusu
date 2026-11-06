@@ -20,6 +20,7 @@ var catalogJA = messages{
 	MsgErrAgentConnFailed:    "エージェントに接続できません",
 	MsgErrUnknownCommand:     "不明なコマンド '%s'",
 	MsgErrVaultNotFound:      "Kakusu が見つかりません。先に 'kakusu init' を実行してください",
+	MsgErrVaultChanged:       "読み込んだ後に Kakusu のファイルが変更されました（同期サービスや別のデバイスなど）。何も保存していません。もう一度コマンドを実行してください",
 	MsgErrInvalidExportNames: "シェルの変数名として使えない名前は export できません（半角英数字と _ のみ、先頭は数字以外）: %s",
 
 	// 使い方
@@ -64,6 +65,8 @@ var catalogJA = messages{
 	MsgKeyCachePresent: "鍵キャッシュ: あり（残り %s）",
 	MsgKeyCacheNone:    "鍵キャッシュ: なし",
 	MsgKeyCacheCleared: "鍵キャッシュを消去しました",
+	MsgWaitingForLock:  "別の kakusu コマンドが %s を解放するのを待っています",
+	MsgLockUnsupported: "警告: %s をロックできません（%v）。ロックせずに続行します",
 
 	// ヘルプ（全文）
 	MsgHelp: `
