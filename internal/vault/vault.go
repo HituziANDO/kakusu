@@ -3,11 +3,13 @@ package vault
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/HituziANDO/kakusu/internal/agent"
@@ -24,13 +26,46 @@ type State struct {
 	Data Data
 	Key  []byte
 	Salt []byte
+	// Loaded is the vault file as the command read it. Save leaves the file as
+	// it is if it no longer matches.
+	Loaded Snapshot
+}
+
+// Snapshot identifies the content of the vault file. The zero Snapshot means
+// that there was no file.
+type Snapshot struct {
+	Exists bool
+	// unreadable means that the file exists but this process may not read it.
+	// Only init can save over such a file, because the other commands cannot
+	// load it; it counts as unchanged while it stays unreadable.
+	unreadable bool
+	sum        [sha256.Size]byte
+}
+
+// ReadSnapshot reads the vault file and returns its Snapshot.
+func ReadSnapshot() (Snapshot, error) {
+	raw, err := os.ReadFile(config.KakusuFile())
+	if os.IsNotExist(err) {
+		return Snapshot{}, nil
+	}
+	if os.IsPermission(err) {
+		return Snapshot{Exists: true, unreadable: true}, nil
+	}
+	if err != nil {
+		return Snapshot{}, err
+	}
+	return snapshotOf(raw), nil
+}
+
+func snapshotOf(raw []byte) Snapshot {
+	return Snapshot{Exists: true, sum: sha256.Sum256(raw)}
 }
 
 // LoadKakusu loads (or creates) the vault.
 // With useCache false it ignores the agent cache and always asks for the
 // password; a correct password is still cached.
 // Password prompters are injected to avoid a dependency on the UI layer.
-func LoadKakusu(password string, allowCreate, useCache bool, promptPw func(string) (string, error), promptNewPw func() (string, error)) (*State, error) {
+func LoadKakusu(password string, allowCreate, useCache bool, promptPw, promptNewPw func() (string, error)) (*State, error) {
 	path := config.KakusuFile()
 	noAgent := config.AgentDisabled()
 
@@ -50,16 +85,20 @@ func LoadKakusu(password string, allowCreate, useCache bool, promptPw func(strin
 		if _, err := io.ReadFull(rand.Reader, salt); err != nil {
 			return nil, err
 		}
-		key := crypto.DeriveKey(password, salt)
+		key, err := crypto.DeriveKey(password, salt)
+		if err != nil {
+			return nil, err
+		}
 		if !noAgent {
 			if err := agent.EnsureAgent(); err == nil {
 				agent.SetKey(key, salt)
 			}
 		}
 		return &State{
-			Data: make(Data),
-			Key:  key,
-			Salt: salt,
+			Data:   make(Data),
+			Key:    key,
+			Salt:   salt,
+			Loaded: Snapshot{},
 		}, nil
 	}
 
@@ -68,6 +107,7 @@ func LoadKakusu(password string, allowCreate, useCache bool, promptPw func(strin
 	if err != nil {
 		return nil, err
 	}
+	loaded := snapshotOf(raw)
 	if len(raw) < crypto.SaltSize {
 		return nil, errors.New(i18n.Msg(i18n.MsgErrFileCorrupted))
 	}
@@ -86,7 +126,7 @@ func LoadKakusu(password string, allowCreate, useCache bool, promptPw func(strin
 						if err := json.Unmarshal(plaintext, &data); err != nil {
 							return nil, fmt.Errorf(i18n.Msg(i18n.MsgErrJSONParse), err)
 						}
-						return &State{Data: data, Key: aKey, Salt: salt}, nil
+						return &State{Data: data, Key: aKey, Salt: salt, Loaded: loaded}, nil
 					}
 				}
 				agent.ClearKey()
@@ -96,13 +136,16 @@ func LoadKakusu(password string, allowCreate, useCache bool, promptPw func(strin
 
 	// Prompt for password.
 	if password == "" {
-		password, err = promptPw(i18n.Msg(i18n.MsgPromptMasterPassword))
+		password, err = promptPw()
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	key := crypto.DeriveKey(password, salt)
+	key, err := crypto.DeriveKey(password, salt)
+	if err != nil {
+		return nil, err
+	}
 	plaintext, err := crypto.DecryptData(blob, key)
 	if err != nil {
 		return nil, errors.New(i18n.Msg(i18n.MsgErrPasswordWrong))
@@ -122,10 +165,13 @@ func LoadKakusu(password string, allowCreate, useCache bool, promptPw func(strin
 		agent.SetKey(key, salt)
 	}
 
-	return &State{Data: data, Key: key, Salt: salt}, nil
+	return &State{Data: data, Key: key, Salt: salt, Loaded: loaded}, nil
 }
 
-// Save writes the vault atomically to disk.
+// Save writes the vault atomically to disk. If the vault file no longer matches
+// s.Loaded, it leaves the file as it is and returns an error. Write commands
+// hold a lock while they run (lockVault in internal/cli/commands.go), but a
+// sync service, for example, does not take it.
 func (s *State) Save() error {
 	dir := config.KakusuDir()
 	if err := os.MkdirAll(dir, 0700); err != nil {
@@ -139,7 +185,8 @@ func (s *State) Save() error {
 	if err != nil {
 		return err
 	}
-	content := append(s.Salt, blob...)
+	// A new slice: s.Salt can share its array with the bytes LoadKakusu read.
+	content := slices.Concat(s.Salt, blob)
 	path := config.KakusuFile()
 
 	tmpFile, err := os.CreateTemp(dir, ".secrets.enc.tmp.*")
@@ -165,6 +212,16 @@ func (s *State) Save() error {
 	if err := os.Chmod(tmpPath, 0600); err != nil {
 		os.Remove(tmpPath)
 		return err
+	}
+	// Check as late as possible, so that a change has little time to slip in.
+	current, err := ReadSnapshot()
+	if err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	if current != s.Loaded {
+		os.Remove(tmpPath)
+		return errors.New(i18n.Msg(i18n.MsgErrVaultChanged))
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
 		os.Remove(tmpPath)

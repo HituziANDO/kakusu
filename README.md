@@ -112,7 +112,7 @@ kakusu run -- python app.py
 | `kakusu agent status`  | Show agent status                                    |
 | `kakusu agent stop`    | Stop the agent                                       |
 
-When you enter the master password, the agent caches the key in memory. `list`, `set`, `delete`, and `run` use the cached key without asking again. `get`, `show`, `export`, and `passwd` never use the cache and always ask for the master password.
+When you enter the master password, the agent caches the key in memory. `list`, `set`, `delete`, and `run` use the cached key without asking again. `get`, `show`, `export`, and `passwd` never use the cache and always ask for the master password. When a command asks for the master password, the prompt names what the command will do and, if it has one, its target (`list` and `passwd` have none); the prompt for a new master password is `New master password: `. On macOS and Linux, password prompts are written to the terminal even when stderr is redirected. After a correct password, the key is cached as described above.
 
 The cache TTL (`KAKUSU_TTL`) is extended each time the cache is used, but the cache ends 8 hours after the last password entry however often it is used.
 
@@ -130,7 +130,7 @@ DB_PASSWORD=kks://myproject/db_password
 OPENAI_API_KEY=kks://shared/openai_key
 ```
 
-`kakusu run` or `kakusu export` replaces `kks://group/key` with actual values. With `kakusu run`, a variable set in the `.env` file replaces an inherited environment variable of the same name.
+`kakusu run` or `kakusu export` replaces `kks://group/key` with actual values. `kks://key` without a group refers to the `default` group. A value that starts with `kks://` but cannot be resolved makes `run` and `export` fail. With `kakusu run`, a variable set in the `.env` file replaces an inherited environment variable of the same name.
 
 ```bash
 # Run directly
@@ -142,6 +142,8 @@ kakusu run --env .env.staging -- python app.py
 # Expand into shell environment variables
 eval "$(kakusu export)"
 ```
+
+`kakusu export` accepts only names that follow the POSIX shell variable name rule (`[A-Za-z_][A-Za-z0-9_]*`). If any name in the `.env` file, or any key that `kakusu export <group>` or `kakusu export <group/key>` would print, breaks the rule, it prints nothing and fails with an error that lists those names. A line written as `export FOO=bar` fails too, because its name is `export FOO`; write `FOO=bar` instead. This guarantees only that the `.env` file cannot change the structure of the printed statements: a valid name such as `PS1`, `PROMPT_COMMAND`, or `PATH` can still make your shell run code later, so review a `.env` file from someone else before you `eval` its export.
 
 ## `run` vs `export`
 
@@ -219,6 +221,14 @@ kakusu protects `.env` files from containing plaintext secrets (secrets never to
 While the key is cached, kakusu itself prints no value unless you type the password at that moment. Processes started by `kakusu run`, however, receive the values. `kakusu run` conceals the values they print as is to output that is not a terminal (see "Concealing Values in `run` Output"), but an AI tool allowed to run `kakusu run` can still obtain them in the ways listed there, for example by printing them transformed (`kakusu run -- sh -c 'printenv DB_PASSWORD | base64'`) or with `--no-masking`. Decide whether to allow `kakusu run` and `--no-masking` in the AI tool's permission settings.
 
 kakusu cannot distinguish processes running as the same user: any of them can obtain the cached key from the agent. Blocking access to `~/.kakusu` is the job of the AI tool's sandbox. Run `kakusu lock` to clear the cache when you finish.
+
+## Running Commands at the Same Time
+
+`init`, `set`, `delete`, and `passwd` lock the file at the vault's path plus `.lock` (by default `~/.kakusu/secrets.enc.lock`) while they run, so that they change the vault one at a time on the same device. If another of these commands holds the lock, kakusu prints the path of the lock file and waits, with no timeout, until that command exits. Other commands do not take the lock. The lock file remains after the command exits.
+
+On a filesystem that cannot lock files, kakusu prints a warning and continues without the lock, so the lock is best effort there.
+
+Right before saving, these commands also check that the vault file has not changed since they loaded it. If a sync service such as Dropbox replaced it in the meantime, they save nothing and exit with an error; run the command again. This does not protect against changing the vault on two devices before the sync service has copied one change to the other: the sync service may make a conflicted copy, and kakusu does not merge it.
 
 ## Security
 
