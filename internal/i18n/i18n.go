@@ -27,6 +27,7 @@ const (
 	MsgErrAgentConnFailed    = "err.agent_conn_failed"
 	MsgErrUnknownCommand     = "err.unknown_command"
 	MsgErrVaultNotFound      = "err.vault_not_found"
+	MsgErrVaultChanged       = "err.vault_changed"
 	MsgErrInvalidExportNames = "err.invalid_export_names"
 
 	// Usage
@@ -69,6 +70,8 @@ const (
 	MsgKeyCachePresent = "status.key_cache_present"
 	MsgKeyCacheNone    = "status.key_cache_none"
 	MsgKeyCacheCleared = "status.key_cache_cleared"
+	MsgWaitingForLock  = "status.waiting_for_lock"
+	MsgLockUnsupported = "status.lock_unsupported"
 
 	// Help / version
 	MsgHelp    = "help.full"

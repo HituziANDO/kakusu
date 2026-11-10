@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -76,18 +77,25 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
-var promptRe = regexp.MustCompile(`(?:password|Confirm): `)
+var promptRe = regexp.MustCompile(`(?:password|Confirm|value|\[y/N\]): `)
 
-// kakusu runs the binary under home with extraEnv added. With no input, stdin
-// is /dev/null. Otherwise each line is written only after the child prints one
-// more password prompt: ui.PromptPassword creates a new bufio.Reader per call,
-// so lines written together would be swallowed by the first prompt.
-func kakusu(t *testing.T, home string, extraEnv, input []string, args ...string) result {
-	t.Helper()
+// kakusuCmd prepares the binary to run under home with only this environment
+// and extraEnv, in a new session.
+func kakusuCmd(home string, extraEnv, args []string) *exec.Cmd {
 	cmd := exec.Command(kakusuBin, args...)
 	cmd.Dir = home
 	cmd.Env = append([]string{"HOME=" + home, "PATH=" + os.Getenv("PATH"), "KAKUSU_LANG=en"}, extraEnv...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	return cmd
+}
+
+// kakusu runs the binary under home with extraEnv added. With no input, stdin
+// is /dev/null. Otherwise each line is written only after the child prints one
+// more prompt: ui.PromptPassword and ui.Confirm create a new bufio.Reader per
+// call, so lines written together would be swallowed by the first prompt.
+func kakusu(t *testing.T, home string, extraEnv, input []string, args ...string) result {
+	t.Helper()
+	cmd := kakusuCmd(home, extraEnv, args)
 	var stdout bytes.Buffer
 	var stderr syncBuffer
 	cmd.Stdout = &stdout
@@ -148,9 +156,127 @@ func mustSucceed(t *testing.T, r result) result {
 	return r
 }
 
-// newVault initializes a vault under a new HOME and stores secrets, leaving
-// the key cached by the agent as after the user typed the password once.
-func newVault(t *testing.T) string {
+// bgKakusu is a child started by startKakusu.
+type bgKakusu struct {
+	t      *testing.T
+	args   []string
+	cmd    *exec.Cmd
+	lines  chan string
+	stdout bytes.Buffer
+	stderr syncBuffer
+	done   chan struct{}
+}
+
+// startKakusu starts the binary as kakusu does but returns at once, so that the
+// test can hold the child at a prompt or while it waits for the lock, and run
+// other children meanwhile. Tests synchronize on what children print; the
+// 10-second limit on each waitFor and wait is only a safety net. t.Cleanup
+// kills the child's process group if it is still running.
+func startKakusu(t *testing.T, home string, extraEnv []string, args ...string) *bgKakusu {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &bgKakusu{
+		t:    t,
+		args: args,
+		cmd:  kakusuCmd(home, extraEnv, args),
+		// Buffered, so that send never waits for the child to prompt.
+		lines: make(chan string, 16),
+		done:  make(chan struct{}),
+	}
+	p.cmd.Stdin = r
+	p.cmd.Stdout = &p.stdout
+	p.cmd.Stderr = &p.stderr
+	err = p.cmd.Start()
+	r.Close()
+	if err != nil {
+		w.Close()
+		t.Fatal(err)
+	}
+	go func() {
+		p.cmd.Wait()
+		close(p.done)
+	}()
+	// Write each sent line only after one more prompt, as kakusu does.
+	go func() {
+		defer w.Close()
+		for i := 0; ; i++ {
+			var line string
+			select {
+			case l, ok := <-p.lines:
+				if !ok {
+					return
+				}
+				line = l
+			case <-p.done:
+				return
+			}
+			for len(promptRe.FindAllString(p.stderr.String(), -1)) <= i {
+				select {
+				case <-p.done:
+					return
+				case <-time.After(10 * time.Millisecond):
+				}
+			}
+			fmt.Fprintln(w, line)
+		}
+	}()
+	t.Cleanup(func() {
+		select {
+		case <-p.done:
+		default:
+			p.kill()
+		}
+	})
+	return p
+}
+
+// send queues lines that answer the child's next prompts, one line per prompt.
+func (p *bgKakusu) send(lines ...string) {
+	for _, line := range lines {
+		p.lines <- line
+	}
+}
+
+// waitFor waits until stderr matches re or the child exits.
+func (p *bgKakusu) waitFor(re *regexp.Regexp) {
+	p.t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for !re.MatchString(p.stderr.String()) {
+		select {
+		case <-p.done:
+			return
+		case <-time.After(10 * time.Millisecond):
+		}
+		if time.Now().After(deadline) {
+			p.t.Fatalf("kakusu %v: stderr did not match %q; stderr: %q", p.args, re, p.stderr.String())
+		}
+	}
+}
+
+// wait closes stdin after the queued lines and waits for the child to exit.
+func (p *bgKakusu) wait() result {
+	p.t.Helper()
+	close(p.lines)
+	select {
+	case <-p.done:
+	case <-time.After(10 * time.Second):
+		p.t.Fatalf("kakusu %v did not exit; stderr: %q", p.args, p.stderr.String())
+	}
+	return result{code: p.cmd.ProcessState.ExitCode(), stdout: p.stdout.String(), stderr: p.stderr.String()}
+}
+
+// kill sends SIGKILL to the child's process group and waits for the child to
+// exit.
+func (p *bgKakusu) kill() {
+	syscall.Kill(-p.cmd.Process.Pid, syscall.SIGKILL)
+	<-p.done
+}
+
+// newHome returns a new empty HOME that is removed when the test ends.
+func newHome(t *testing.T) string {
 	t.Helper()
 	// Short path: macOS limits Unix socket paths to 104 bytes.
 	home, err := os.MkdirTemp("", "kk")
@@ -158,6 +284,14 @@ func newVault(t *testing.T) string {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(home) })
+	return home
+}
+
+// newVault initializes a vault under a new HOME and stores secrets, leaving
+// the key cached by the agent as after the user typed the password once.
+func newVault(t *testing.T) string {
+	t.Helper()
+	home := newHome(t)
 	// The agent detaches from the child, so stop it explicitly.
 	t.Cleanup(func() { kakusu(t, home, nil, nil, "agent", "stop") })
 
@@ -530,6 +664,304 @@ func TestAgentClampsTTLTo8Hours(t *testing.T) {
 	r := mustSucceed(t, kakusu(t, home, nil, nil, "agent", "status"))
 	if !strings.Contains(r.stderr, "TTL:       8h0m0s\n") {
 		t.Errorf("stderr %q; want TTL 8h0m0s", r.stderr)
+	}
+}
+
+// noAgent makes every command ask for the password, so that a test can hold a
+// command at its prompt for as long as it needs.
+var noAgent = []string{"KAKUSU_NO_AGENT=1"}
+
+var (
+	masterPromptRe = regexp.MustCompile(`enter the master password: `)
+	waitingRe      = regexp.MustCompile(`waiting for another kakusu command to release `)
+	changedRe      = regexp.MustCompile(`vault file changed after it was loaded`)
+	confirmRe      = regexp.MustCompile(`\[y/N\]: `)
+)
+
+// newNoAgentVault initializes an empty vault under a new HOME for tests that
+// pass noAgent.
+func newNoAgentVault(t *testing.T) string {
+	t.Helper()
+	home := newHome(t)
+	mustSucceed(t, kakusu(t, home, noAgent, []string{testPassword, testPassword}, "init"))
+	return home
+}
+
+func TestConcurrentSetsKeepBothValues(t *testing.T) {
+	home := newNoAgentVault(t)
+	a := startKakusu(t, home, noAgent, "set", "race/a", "1")
+	a.waitFor(masterPromptRe)
+	b := startKakusu(t, home, noAgent, "set", "race/b", "2")
+	b.send(testPassword)
+	// Without the lock, b loads and saves the vault and exits here.
+	b.waitFor(waitingRe)
+	a.send(testPassword)
+	mustSucceed(t, a.wait())
+	rb := mustSucceed(t, b.wait())
+
+	r := mustSucceed(t, kakusu(t, home, noAgent, []string{testPassword}, "list", "race"))
+	if want := "\n[race]\n  a  ***\n  b  ***\n\n"; r.stdout != want {
+		t.Errorf("list stdout %q; want %q", r.stdout, want)
+	}
+	lockPath := filepath.Join(home, ".kakusu", "secrets.enc.lock")
+	if n := strings.Count(rb.stderr, "waiting for another kakusu command to release "+lockPath+"\n"); n != 1 {
+		t.Errorf("b stderr %q has %d waiting lines naming %s; want 1", rb.stderr, n, lockPath)
+	}
+}
+
+func TestPasswdDuringSetIsNotReverted(t *testing.T) {
+	home := newNoAgentVault(t)
+	s := startKakusu(t, home, noAgent, "set", "race/a", "1")
+	s.waitFor(masterPromptRe)
+	p := startKakusu(t, home, noAgent, "passwd")
+	p.send(testPassword, "NEWPASS12", "NEWPASS12")
+	// Without the lock, passwd changes the password and exits here, and set
+	// then saves the vault with the old salt and key.
+	p.waitFor(waitingRe)
+	s.send(testPassword)
+	mustSucceed(t, s.wait())
+	mustSucceed(t, p.wait())
+
+	if r := kakusu(t, home, noAgent, []string{"NEWPASS12"}, "get", "race/a"); r.code != 0 || r.stdout != "1\n" {
+		t.Errorf("get with the new password: exit %d, stdout %q, stderr %q; want exit 0 and %q", r.code, r.stdout, r.stderr, "1\n")
+	}
+	if r := kakusu(t, home, noAgent, []string{testPassword}, "list"); r.code == 0 || !strings.Contains(r.stderr, "wrong password") {
+		t.Errorf("list with the old password: exit %d, stderr %q; want the wrong password error", r.code, r.stderr)
+	}
+}
+
+func TestSetSavesNothingWhenVaultChangedAfterLoad(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		absent  bool // set finds no vault and creates one
+		remove  bool // the change removes the vault instead of replacing it
+		answers []string
+	}{
+		{"replaced", false, false, []string{testPassword}},
+		{"appeared", true, false, []string{testPassword, testPassword}},
+		{"vanished", false, true, []string{testPassword}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := newNoAgentVault(t)
+			vaultPath := filepath.Join(home, ".kakusu", "secrets.enc")
+			// A valid vault that differs from the one set loads, as another
+			// device would write it.
+			other, err := os.ReadFile(vaultPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.absent {
+				if err := os.Remove(vaultPath); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				mustSucceed(t, kakusu(t, home, noAgent, []string{testPassword}, "set", "x/y", "1"))
+			}
+
+			s := startKakusu(t, home, noAgent, "set", "race/a", "1")
+			s.waitFor(promptRe)
+			// Change the vault without the lock, as a sync service would.
+			if tc.remove {
+				err = os.Remove(vaultPath)
+			} else {
+				err = os.WriteFile(vaultPath, other, 0600)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.send(tc.answers...)
+			r := s.wait()
+
+			if r.code != 1 || !changedRe.MatchString(r.stderr) {
+				t.Errorf("exit %d, stderr %q; want exit 1 and the changed-vault error", r.code, r.stderr)
+			}
+			got, err := os.ReadFile(vaultPath)
+			if tc.remove {
+				if !os.IsNotExist(err) {
+					t.Errorf("vault read error %v; want the vault still removed", err)
+				}
+			} else if err != nil || !bytes.Equal(got, other) {
+				t.Errorf("vault read error %v, equal %v; want the bytes written during set kept", err, bytes.Equal(got, other))
+			}
+			if tmps, _ := filepath.Glob(filepath.Join(home, ".kakusu", ".secrets.enc.tmp.*")); len(tmps) != 0 {
+				t.Errorf("temporary files %v left; want none", tmps)
+			}
+		})
+	}
+}
+
+func TestKilledSetLeavesNoStaleLock(t *testing.T) {
+	home := newNoAgentVault(t)
+	a := startKakusu(t, home, noAgent, "set", "race/a", "1")
+	a.waitFor(masterPromptRe)
+	a.kill()
+
+	r := mustSucceed(t, kakusu(t, home, noAgent, []string{testPassword}, "set", "race/b", "2"))
+	if waitingRe.MatchString(r.stderr) {
+		t.Errorf("stderr %q; want no waiting line", r.stderr)
+	}
+}
+
+func TestListDoesNotWaitForLock(t *testing.T) {
+	home := newNoAgentVault(t)
+	a := startKakusu(t, home, noAgent, "set", "race/a", "1")
+	a.waitFor(masterPromptRe)
+
+	r := mustSucceed(t, kakusu(t, home, noAgent, []string{testPassword}, "list"))
+	if waitingRe.MatchString(r.stderr) {
+		t.Errorf("stderr %q; want no waiting line", r.stderr)
+	}
+	a.send(testPassword)
+	mustSucceed(t, a.wait())
+}
+
+func TestConcurrentSetsCreatingVaultKeepBothValues(t *testing.T) {
+	home := newHome(t)
+	a := startKakusu(t, home, noAgent, "set", "race/a", "1")
+	a.waitFor(regexp.MustCompile(`New master password: `))
+	b := startKakusu(t, home, noAgent, "set", "race/b", "2")
+	b.waitFor(waitingRe)
+	a.send(testPassword, testPassword)
+	mustSucceed(t, a.wait())
+	b.waitFor(promptRe)
+	b.send(testPassword)
+	// b loads the vault that a created, so it asks for that vault's password.
+	if rb := b.wait(); rb.code != 0 || !masterPromptRe.MatchString(rb.stderr) || strings.Contains(rb.stderr, "New master password: ") {
+		t.Errorf("b: exit %d, stderr %q; want exit 0 after only the master password prompt", rb.code, rb.stderr)
+	}
+
+	r := mustSucceed(t, kakusu(t, home, noAgent, []string{testPassword}, "list", "race"))
+	if want := "\n[race]\n  a  ***\n  b  ***\n\n"; r.stdout != want {
+		t.Errorf("list stdout %q; want %q", r.stdout, want)
+	}
+}
+
+func TestSetWarnsAndSavesWhenLockIsUnsupported(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("needs flock to fail with ENOTSUP on a FIFO, as it does on macOS")
+	}
+	home := newNoAgentVault(t)
+	// flock on a FIFO fails with the error a filesystem without locks returns.
+	lockPath := filepath.Join(home, ".kakusu", "secrets.enc.lock")
+	if err := os.Remove(lockPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(lockPath, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	r := mustSucceed(t, kakusu(t, home, noAgent, []string{testPassword}, "set", "race/a", "1"))
+	if want := "warning: cannot lock " + lockPath + " "; !strings.Contains(r.stderr, want) {
+		t.Errorf("stderr %q; want %q", r.stderr, want)
+	}
+	if r := mustSucceed(t, kakusu(t, home, noAgent, []string{testPassword}, "get", "race/a")); r.stdout != "1\n" {
+		t.Errorf("get stdout %q; want %q", r.stdout, "1\n")
+	}
+}
+
+func TestInitOverwritesExistingVault(t *testing.T) {
+	home := newNoAgentVault(t)
+	mustSucceed(t, kakusu(t, home, noAgent, []string{"y", "NEWPASS12", "NEWPASS12"}, "init"))
+	mustSucceed(t, kakusu(t, home, noAgent, []string{"NEWPASS12"}, "list"))
+}
+
+func TestSetWaitsWhileDeleteHoldsLock(t *testing.T) {
+	home := newNoAgentVault(t)
+	mustSucceed(t, kakusu(t, home, noAgent, []string{testPassword}, "set", "race/x", "1"))
+	d := startKakusu(t, home, noAgent, "delete", "race/x")
+	d.send(testPassword)
+	d.waitFor(confirmRe)
+	s := startKakusu(t, home, noAgent, "set", "race/a", "1")
+	s.send(testPassword)
+	// Without the lock, set saves and exits here, and delete then saves nothing.
+	s.waitFor(waitingRe)
+	d.send("y")
+	mustSucceed(t, d.wait())
+	mustSucceed(t, s.wait())
+
+	r := mustSucceed(t, kakusu(t, home, noAgent, []string{testPassword}, "list", "race"))
+	if want := "\n[race]\n  a  ***\n\n"; r.stdout != want {
+		t.Errorf("list stdout %q; want %q", r.stdout, want)
+	}
+}
+
+func TestSetWaitsWhileInitHoldsLock(t *testing.T) {
+	home := newNoAgentVault(t)
+	i := startKakusu(t, home, noAgent, "init")
+	i.waitFor(confirmRe)
+	s := startKakusu(t, home, noAgent, "set", "race/a", "1")
+	s.send("NEWPASS12")
+	// Without the lock, set loads the old vault here and rejects the password.
+	s.waitFor(waitingRe)
+	i.send("y", "NEWPASS12", "NEWPASS12")
+	mustSucceed(t, i.wait())
+	mustSucceed(t, s.wait())
+
+	if r := mustSucceed(t, kakusu(t, home, noAgent, []string{"NEWPASS12"}, "get", "race/a")); r.stdout != "1\n" {
+		t.Errorf("get stdout %q; want %q", r.stdout, "1\n")
+	}
+}
+
+func TestSetAsksForValueBeforeWaitingForLock(t *testing.T) {
+	home := newNoAgentVault(t)
+	a := startKakusu(t, home, noAgent, "set", "race/a", "1")
+	a.waitFor(masterPromptRe)
+	v := startKakusu(t, home, noAgent, "set", "race/v")
+	v.send("V", testPassword)
+	v.waitFor(waitingRe)
+	a.send(testPassword)
+	mustSucceed(t, a.wait())
+
+	rv := mustSucceed(t, v.wait())
+	if want := "\"race/v\" value: waiting for another kakusu command to release "; !strings.HasPrefix(rv.stderr, want) {
+		t.Errorf("stderr %q; want it to start with %q", rv.stderr, want)
+	}
+}
+
+func TestLockFileFollowsKakusuFile(t *testing.T) {
+	home := newHome(t)
+	vaultPath := filepath.Join(home, "other", "v.enc")
+	env := append([]string{"KAKUSU_FILE=" + vaultPath}, noAgent...)
+	mustSucceed(t, kakusu(t, home, env, []string{testPassword, testPassword}, "init"))
+	a := startKakusu(t, home, env, "set", "race/a", "1")
+	a.waitFor(masterPromptRe)
+	b := startKakusu(t, home, env, "set", "race/b", "2")
+	b.send(testPassword)
+	b.waitFor(waitingRe)
+	a.send(testPassword)
+	mustSucceed(t, a.wait())
+
+	rb := mustSucceed(t, b.wait())
+	if want := "waiting for another kakusu command to release " + vaultPath + ".lock\n"; !strings.Contains(rb.stderr, want) {
+		t.Errorf("stderr %q; want %q", rb.stderr, want)
+	}
+}
+
+func TestInitOverwritesUnreadableVault(t *testing.T) {
+	home := newNoAgentVault(t)
+	if err := os.Chmod(filepath.Join(home, ".kakusu", "secrets.enc"), 0); err != nil {
+		t.Fatal(err)
+	}
+	r := mustSucceed(t, kakusu(t, home, noAgent, []string{"y", "NEWPASS12", "NEWPASS12"}, "init"))
+	if !confirmRe.MatchString(r.stderr) {
+		t.Errorf("stderr %q; want the overwrite question", r.stderr)
+	}
+	mustSucceed(t, kakusu(t, home, noAgent, []string{"NEWPASS12"}, "list"))
+}
+
+func TestDeleteAndPasswdWithoutVaultCreateNothing(t *testing.T) {
+	for _, args := range [][]string{{"delete", "a/b"}, {"passwd"}} {
+		t.Run(args[0], func(t *testing.T) {
+			home := newHome(t)
+			env := append([]string{"KAKUSU_FILE=" + filepath.Join(home, "nope", "sub", "secrets.enc")}, noAgent...)
+			r := kakusu(t, home, env, nil, args...)
+			if r.code != 1 || !strings.Contains(r.stderr, "vault not found") {
+				t.Errorf("exit %d, stderr %q; want exit 1 and the vault-not-found error", r.code, r.stderr)
+			}
+			if _, err := os.Stat(filepath.Join(home, "nope")); !os.IsNotExist(err) {
+				t.Errorf("stat of the vault's parent directory: %v; want it absent", err)
+			}
+		})
 	}
 }
 

@@ -196,6 +196,14 @@ While the key is cached, kakusu itself prints no value unless you type the passw
 
 kakusu cannot distinguish processes running as the same user: any of them can obtain the cached key from the agent. Blocking access to `~/.kakusu` is the job of the AI tool's sandbox. Run `kakusu lock` to clear the cache when you finish.
 
+## Running Commands at the Same Time
+
+`init`, `set`, `delete`, and `passwd` lock the file at the vault's path plus `.lock` (by default `~/.kakusu/secrets.enc.lock`) while they run, so that they change the vault one at a time on the same device. If another of these commands holds the lock, kakusu prints the path of the lock file and waits, with no timeout, until that command exits. Other commands do not take the lock. The lock file remains after the command exits.
+
+On a filesystem that cannot lock files, kakusu prints a warning and continues without the lock, so the lock is best effort there.
+
+Right before saving, these commands also check that the vault file has not changed since they loaded it. If a sync service such as Dropbox replaced it in the meantime, they save nothing and exit with an error; run the command again. This does not protect against changing the vault on two devices before the sync service has copied one change to the other: the sync service may make a conflicted copy, and kakusu does not merge it.
+
 ## Security
 
 - **Encryption**: AES-256-GCM (authenticated encryption with tamper detection)
