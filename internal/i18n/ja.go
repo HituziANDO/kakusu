@@ -28,7 +28,7 @@ var catalogJA = messages{
 	MsgUsageGet:    "使い方: kakusu get <group/key>",
 	MsgUsageShow:   "使い方: kakusu show <group/key>",
 	MsgUsageDelete: "使い方: kakusu delete <group/key>",
-	MsgUsageRun:    "使い方: kakusu run [--env FILE] -- <command> [args...]",
+	MsgUsageRun:    "使い方: kakusu run [--env FILE] [--no-masking] -- <command> [args...]",
 	MsgUsageAgent:  "使い方: kakusu agent <stop|status>",
 	MsgUsageHint:   "  kakusu help  でコマンド一覧を確認してください",
 
@@ -93,9 +93,22 @@ kakusu - ローカル秘密情報管理CLI
 
 【.env 連携】
   kakusu run [--env FILE] -- <cmd>     .env の kks:// 参照を解決してコマンド実行
+  kakusu run --no-masking -- <cmd>     出力中の値を隠さずにコマンド実行
   kakusu export [--env FILE]           eval 用に export 文を出力
   kakusu export <group>                グループ内の全シークレットを export
   kakusu export <group/key>            特定のシークレットを export
+
+  stdout または stderr が端末でないとき、run はその出力に現れる kks:// 参照の
+  値を <concealed by kakusu> に置き換えます。端末への出力（疑似端末を使う AI
+  ツールを含む）、変換された値（base64・エスケープ・一部分・LF が CRLF になった
+  もの）、コマンドが別の場所（ファイル・/dev/tty・ネットワーク）に書いた値、
+  --no-masking を付けたときの出力（パイプで値を渡すときに使う）は隠しません。
+  隠している間は、出力を開いたままのバックグラウンドプロセスがあるとシグナルで
+  止めるまで run は終了せず、プロセスグループ全体に送ったシグナルはコマンドに
+  2 回届き、端末の前景で run だけに送った SIGINT / SIGQUIT はコマンドに渡り
+  ません。--no-masking を付けると、コマンドは直接実行したときと同じように動き
+  ます。AI ツールに run と --no-masking を許可するかは、その権限設定で決めて
+  ください。
 
 【.env ファイルの書き方】
   DB_HOST=localhost

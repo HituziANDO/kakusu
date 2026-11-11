@@ -2,6 +2,7 @@ package cli
 
 import (
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,12 +12,15 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/HituziANDO/kakusu/internal/agent"
+	"github.com/HituziANDO/kakusu/internal/conceal"
 	"github.com/HituziANDO/kakusu/internal/config"
 	"github.com/HituziANDO/kakusu/internal/crypto"
 	"github.com/HituziANDO/kakusu/internal/i18n"
@@ -49,6 +53,7 @@ func init() {
 
 	setCmd.Flags().SetInterspersed(false)
 	runCmd.Flags().String("env", ".env", "env file path")
+	runCmd.Flags().Bool("no-masking", false, "print values in output as is")
 	runCmd.Flags().SetInterspersed(false)
 	exportCmd.Flags().String("env", ".env", "env file path")
 
@@ -347,13 +352,14 @@ var deleteCmd = &cobra.Command{
 // ---------------------------------------------------------------------------
 
 var runCmd = &cobra.Command{
-	Use:   "run [--env FILE] -- <command> [args...]",
+	Use:   "run [--env FILE] [--no-masking] -- <command> [args...]",
 	Short: "Resolve kks:// refs and run command",
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) == 0 {
 			ui.Die(i18n.Msg(i18n.MsgUsageRun))
 		}
 		envFile, _ := cmd.Flags().GetString("env")
+		noMasking, _ := cmd.Flags().GetBool("no-masking")
 
 		if _, err := os.Stat(envFile); os.IsNotExist(err) {
 			ui.Die(i18n.Msgf(i18n.MsgErrEnvFileNotFound, envFile))
@@ -363,8 +369,10 @@ var runCmd = &cobra.Command{
 		for i, a := range args {
 			quoted[i] = strconv.Quote(a)
 		}
+		// Nothing below refers to s after the env file is resolved; only the
+		// values from the env file are used while the command runs.
 		s := loadVault(false, i18n.Msgf(i18n.MsgPromptPasswordToRun, strings.Join(quoted, " "), envFileForPrompt(envFile)))
-		injected, err := vault.ResolveDotenv(envFile, s.Data)
+		injected, secrets, err := vault.ResolveDotenv(envFile, s.Data)
 		if err != nil {
 			ui.Die(err.Error())
 		}
@@ -376,7 +384,17 @@ var runCmd = &cobra.Command{
 		sort.Strings(keys)
 		fmt.Fprintf(os.Stderr, "✓ %s\n", i18n.Msgf(i18n.MsgInjected, strings.Join(keys, ", ")))
 
-		env := os.Environ()
+		// Drop the inherited variables that the env file sets. With both,
+		// the value the command sees would depend on the mode: on Unix,
+		// ExecRun passes both and getenv returns the first, while os/exec
+		// keeps the last.
+		var env []string
+		for _, kv := range os.Environ() {
+			k, _, _ := strings.Cut(kv, "=")
+			if _, ok := injected[k]; !ok {
+				env = append(env, kv)
+			}
+		}
 		for k, v := range injected {
 			env = append(env, k+"="+v)
 		}
@@ -385,10 +403,135 @@ var runCmd = &cobra.Command{
 		if err != nil {
 			ui.Die(i18n.Msgf(i18n.MsgErrCommandNotFound, args[0]))
 		}
-		if err := platform.ExecRun(bin, args, env); err != nil {
+
+		stdoutTerminal := term.IsTerminal(int(os.Stdout.Fd()))
+		stderrTerminal := term.IsTerminal(int(os.Stderr.Fd()))
+		mode := chooseRunMode(noMasking, stdoutTerminal, stderrTerminal, platform.SameFile(os.Stdout, os.Stderr))
+		if mode == runExec {
+			if err := platform.ExecRun(bin, args, env); err != nil {
+				ui.Die(err.Error())
+			}
+			return
+		}
+
+		c := &exec.Cmd{Path: bin, Args: platform.ChildArgs(bin, args), Env: env, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}
+		var relays []*relay
+		pipe := func(out *os.File) *os.File {
+			r, err := newRelay(out, secrets)
+			if err != nil {
+				ui.Die(err.Error())
+			}
+			relays = append(relays, r)
+			return r.w
+		}
+		if mode == runConcealShared {
+			w := pipe(os.Stdout)
+			c.Stdout, c.Stderr = w, w
+		} else {
+			if !stdoutTerminal {
+				c.Stdout = pipe(os.Stdout)
+			}
+			if !stderrTerminal {
+				c.Stderr = pipe(os.Stderr)
+			}
+		}
+		var wg sync.WaitGroup
+		var outputs []*os.File
+		for _, r := range relays {
+			outputs = append(outputs, r.w)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				r.copy()
+			}()
+		}
+		drained := make(chan struct{})
+		go func() {
+			wg.Wait()
+			close(drained)
+		}()
+		err = platform.RunChild(c, outputs, drained)
+		if c.ProcessState == nil {
 			ui.Die(err.Error())
 		}
+		// Output that could not be written for a reason other than a reader
+		// that has gone makes run fail with that error, whatever the command
+		// did: once its pipe is closed, the command's next write fails by
+		// SIGPIPE, which would hide the cause. Otherwise a command that
+		// failed decides the exit status, and a command that succeeded but
+		// lost its reader makes run exit 128+SIGPIPE, as a shell reports a
+		// death by SIGPIPE.
+		for _, r := range relays {
+			if r.err != nil && !errors.Is(r.err, syscall.EPIPE) {
+				ui.Die(r.err.Error())
+			}
+		}
+		if c.ProcessState.Success() {
+			for _, r := range relays {
+				if errors.Is(r.err, syscall.EPIPE) {
+					os.Exit(128 + int(syscall.SIGPIPE))
+				}
+			}
+		}
+		platform.ExitWithStatus(c.ProcessState)
 	},
+}
+
+// runMode is how run connects the command's stdout and stderr.
+type runMode int
+
+const (
+	// runExec runs the command through platform.ExecRun, which gives it
+	// kakusu's stdout and stderr, so nothing is concealed.
+	runExec runMode = iota
+	// runConceal passes a stream that is a terminal to the command as is and
+	// conceals the values in each other stream through its own pipe.
+	runConceal
+	// runConcealShared conceals stdout and stderr through one pipe. They are
+	// the same file (2>&1), and one pipe keeps the order of the writes.
+	runConcealShared
+)
+
+// relay copies what the command writes to the pipe end w into out with the
+// values concealed. The command gets w as an *os.File, so that waiting for
+// the command does not wait for a process it started that keeps w open.
+type relay struct {
+	r, w *os.File
+	cw   *conceal.Writer
+	err  error // why copy stopped before the end of the output, or nil
+}
+
+func newRelay(out io.Writer, secrets []string) (*relay, error) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		return nil, err
+	}
+	return &relay{r: r, w: w, cw: conceal.NewWriter(out, secrets)}, nil
+}
+
+// copy copies until every process holding w has closed it, and then writes
+// the bytes that the conceal.Writer holds. If writing to out fails, it stops
+// and closes r, so that the command's next write fails by EPIPE or SIGPIPE,
+// whatever error writing to out returned.
+func (r *relay) copy() {
+	_, r.err = io.Copy(r.cw, r.r)
+	if r.err == nil {
+		r.err = r.cw.Flush()
+	}
+	r.r.Close()
+}
+
+// chooseRunMode conceals output unless noMasking is set or both stdout and
+// stderr are terminals.
+func chooseRunMode(noMasking, stdoutTerminal, stderrTerminal, sameFile bool) runMode {
+	switch {
+	case noMasking || stdoutTerminal && stderrTerminal:
+		return runExec
+	case sameFile:
+		return runConcealShared
+	default:
+		return runConceal
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -444,7 +587,7 @@ var exportCmd = &cobra.Command{
 		}
 
 		s := loadVaultAskingPassword(i18n.Msgf(i18n.MsgPromptPasswordToPrintEnv, envFileForPrompt(envFile)))
-		injected, err := vault.ResolveDotenv(envFile, s.Data)
+		injected, _, err := vault.ResolveDotenv(envFile, s.Data)
 		if err != nil {
 			ui.Die(err.Error())
 		}

@@ -70,7 +70,7 @@ func TestResolveDotenv(t *testing.T) {
 			if err := os.WriteFile(path, []byte(tc.env), 0600); err != nil {
 				t.Fatal(err)
 			}
-			got, err := ResolveDotenv(path, data)
+			got, _, err := ResolveDotenv(path, data)
 			if tc.wantErr != "" {
 				if err == nil || err.Error() != tc.wantErr || got != nil {
 					t.Errorf("got %q, error %v; want error %q", got, err, tc.wantErr)

@@ -13,14 +13,17 @@ import (
 // A value that starts with kks:// is a reference: kks://group/key, or kks://key
 // for the default group. A reference with an empty group or key, with
 // whitespace, or to a missing secret is an error.
-func ResolveDotenv(envPath string, data Data) (map[string]string, error) {
+// It returns every variable, and separately the values resolved from kks://
+// references.
+func ResolveDotenv(envPath string, data Data) (map[string]string, []string, error) {
 	f, err := os.Open(envPath)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer f.Close()
 
 	result := make(map[string]string)
+	var secrets []string
 	var missing []string
 	lineno := 0
 
@@ -56,6 +59,7 @@ func ResolveDotenv(envPath string, data Data) (map[string]string, error) {
 				missing = append(missing, i18n.Msgf(i18n.MsgErrRefDetail, lineno, envKey, group, key))
 			} else {
 				result[envKey] = secret
+				secrets = append(secrets, secret)
 			}
 		} else {
 			result[envKey] = rawVal
@@ -63,7 +67,7 @@ func ResolveDotenv(envPath string, data Data) (map[string]string, error) {
 	}
 
 	if len(missing) > 0 {
-		return nil, errors.New(i18n.Msgf(i18n.MsgErrUnresolvedRefs, strings.Join(missing, "\n")))
+		return nil, nil, errors.New(i18n.Msgf(i18n.MsgErrUnresolvedRefs, strings.Join(missing, "\n")))
 	}
-	return result, nil
+	return result, secrets, nil
 }
