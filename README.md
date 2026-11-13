@@ -2,8 +2,6 @@
 
 [Japanese (日本語)](./docs/README_ja.md)
 
-![kakusu image](./readme-image/kakusu-image.jpg "Header Image")
-
 `kakusu` is a CLI tool for securely storing and managing secrets (API keys, passwords, etc.) locally.
 
 Write `kks://group/key` references in your `.env` files, and kakusu resolves them to actual values at runtime, injecting them as environment variables. The secrets themselves exist only in an encrypted file — your `.env` files never contain sensitive data.
@@ -14,6 +12,9 @@ Write `kks://group/key` references in your `.env` files, and kakusu resolves the
 - Automatically resolves `kks://` references in `.env` files and injects them into commands
 - **AES-256-GCM** + **PBKDF2-HMAC-SHA256** (600,000 iterations) encryption
 - **Agent** for master password caching (ssh-agent pattern)
+- Conceals values from `kks://` references in `kakusu run` output that is not a terminal, such as output read by AI tools and CI
+- Commands that print values always ask for the master password
+- Write commands lock the vault and do not overwrite a change that a sync service made while they ran
 - Fully local — no external services required
 - **Multi-language support**: English (default) / Japanese, switchable via environment variable
 - Minimal dependencies (`cobra` + `golang.org/x/term` + `golang.org/x/sys`)
@@ -114,7 +115,7 @@ kakusu run -- python app.py
 
 When you enter the master password, the agent caches the key in memory. `list`, `set`, `delete`, and `run` use the cached key without asking again. `get`, `show`, `export`, and `passwd` never use the cache and always ask for the master password. When a command asks for the master password, the prompt names what the command will do and, if it has one, its target (`list` and `passwd` have none); the prompt for a new master password is `New master password: `. On macOS and Linux, password prompts are written to the terminal even when stderr is redirected. After a correct password, the key is cached as described above.
 
-The cache TTL (`KAKUSU_TTL`) is extended each time the cache is used, but the cache ends 8 hours after the last password entry however often it is used.
+The cache TTL (`KAKUSU_TTL`) is extended each time the cache is used, but the cache ends 8 hours after the last password entry however often it is used. Both limits are measured in wall-clock time, so time while the computer sleeps counts.
 
 If you upgrade from v0.5.0 or earlier, run `kakusu agent stop` once after upgrading. An agent that is already running keeps being used with the old behavior, which has no 8-hour limit, and `kakusu lock` only clears its key without stopping it.
 
@@ -187,6 +188,9 @@ While concealing, `kakusu run` runs the command as a child in the same process g
 - The command writes to a pipe even when the output of `kakusu run` is a file, so a command that seeks in its output fails with "Illegal seek". Use `--no-masking`, or let the command write the file itself.
 - On Unix, `kakusu run` passes on the signals it receives, so a signal sent to the whole process group (`kill -TERM -<PGID>`) reaches the command twice. SIGINT or SIGQUIT sent to `kakusu run` alone while it is in the terminal's foreground is not passed on, because the terminal sends them to the command too.
 - If the output cannot be written because the reader has gone (on Unix), `kakusu run` exits with the command's status, or with status 141, as a shell reports a death by SIGPIPE, if the command succeeded. If it cannot be written for another reason, such as a full disk, `kakusu run` prints the error and exits with status 1, whatever the command did.
+- On Unix, if a signal other than SIGHUP, SIGINT, or SIGTERM kills the command, `kakusu run` exits with status 128+N instead of being killed by that signal. A shell reports the same `$?`, but a program that checks whether its child was killed by a signal sees a normal exit.
+- If `kakusu run` itself is killed by SIGKILL, the command keeps running, and its writes to the relayed output fail from then on.
+- On Windows, stdout and stderr go through separate pipes even when they are the same file (`2>&1`), so output from the two can come out in a different order than the command wrote it.
 
 With `--no-masking`, the command runs as if run directly, with the same signals and output.
 
@@ -235,7 +239,9 @@ Right before saving, these commands also check that the vault file has not chang
 - **Encryption**: AES-256-GCM (authenticated encryption with tamper detection)
 - **Key Derivation**: PBKDF2-HMAC-SHA256 (600,000 iterations)
 - **Key Cache**: Agent process holds the key in memory only (never written to disk)
-- **File Permissions**: Encrypted vault is `0600`, socket is `0600`
+- **Printing Values**: `get`, `show`, and `export` always ask for the master password, and `list` prints no part of any value
+- **`run` Output**: Values from `kks://` references are concealed in output that is not a terminal
+- **File Permissions**: Encrypted vault, its lock file, and socket are `0600`
 - **Agent**: Auto-start, key cleared after TTL expiry or 8 hours after the last password entry, auto-shutdown on idle
 
 ## License
