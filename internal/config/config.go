@@ -8,7 +8,7 @@ import (
 )
 
 // Version is set via ldflags at build time (e.g. -X ...config.Version=1.0.0).
-var Version = "0.5.0"
+var Version = "0.6.0"
 
 const DefaultTTL = 30 * time.Minute
 
